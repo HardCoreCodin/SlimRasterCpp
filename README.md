@@ -2,11 +2,13 @@
 
 <img src="src/examples/SlimRaster.gif"><br>
 
-A minimalist, platform agnostic interactive real time rasterizer.<br>
-Strong emphasis on simplicity, ease of use and almost no setup to get started with<br>
-Written in plain C and can be complied in either C or C++<br>
+Minimalist interactive real time rasterizer (pure-software, no hardware acceleration).<br>
+Written from scratch in C++. For the original C variant, see [SlimRaster](https://github.com/HardCoreCodin/SlimRaster)<br>
+Focuses on simplicity, ease of use and setup with no dependencies and an optional single header file variant<br>
+<br>
+Built on: [SlimEngine++](https://github.com/HardCoreCodin/SlimEngineCpp) <br>
 
-This project extends [SlimEngine++](https://github.com/HardCoreCodin/SlimEngineCpp).
+For related projects, see [my portfolio](https://hardcorecodin.com/portfolio).<br>
 
 Features:
 -
