@@ -12,10 +12,10 @@ For related projects, see [my portfolio](https://hardcorecodin.com/portfolio).<b
 
 Features:
 -
-All features of <b>SlimEngine</b> are available here as well.<br>
+All features of <b>SlimEngine++</b> are available here as well.<br>
 Additional features include rasterization facilities:<br>
-- Pixel Shaders that feed interpolated vertex attributes
-- Mesh shaders for object culling using axis-aligned bounding boxes
+- Pixel Shaders: Given interpolated vertex attributes and UV derivatives
+- Mesh shaders:  Can be used for mesh culling using their axis-aligned bounding boxes
 - Perspective corrected barycentric coordinates
 - Tangent space derivatives for adaptive texture mip-level selection
 - Bi-linear filtered texture sampling with auto-selected mip levels
