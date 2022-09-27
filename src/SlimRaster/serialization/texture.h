@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../core/string.h"
-#include "../scene/texture.h"
+#include "../core/texture.h"
 
 
 u32 getSizeInBytes(const Texture &texture) {
@@ -125,12 +125,32 @@ bool load(Texture &texture, char *file_path, memory::MonotonicAllocator *memory_
     return true;
 }
 
-u32 getTotalMemoryForTextures(String *texture_files, u32 mesh_count) {
+u32 getTotalMemoryForTextures(String *texture_files, u32 texture_count) {
     u32 memory_size{0};
-    for (u32 i = 0; i < mesh_count; i++) {
+    for (u32 i = 0; i < texture_count; i++) {
         Texture texture;
         loadHeader(texture, texture_files[i].char_ptr);
         memory_size += getSizeInBytes(texture);
     }
     return memory_size;
 }
+
+struct TexturePack {
+    TexturePack(u8 count, Texture *textures, char **files, char* adjacent_file, u64 memory_base = Terabytes(3)) {
+        char string_buffer[200];
+        u32 memory_size{0};
+        Texture *texture = textures;
+        for (u32 i = 0; i < count; i++, texture++) {
+            String string = String::getFilePath(files[i], string_buffer, adjacent_file);
+            loadHeader(*texture, string.char_ptr);
+            memory_size += getSizeInBytes(*texture);
+        }
+        memory::MonotonicAllocator memory_allocator{memory_size, memory_base};
+
+        texture = textures;
+        for (u32 i = 0; i < count; i++, texture++) {
+            String string = String::getFilePath(files[i], string_buffer, adjacent_file);
+            load(*texture, string.char_ptr, &memory_allocator);
+        }
+    }
+};

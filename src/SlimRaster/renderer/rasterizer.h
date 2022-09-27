@@ -21,9 +21,10 @@
 #define CULL    0b00000000
 #define INSIDE  0b00000010
 
+
+
 struct Rasterizer {
     static CubeMesh cube;
-
     Scene &scene;
 
     u8 *vertex_flags;
@@ -31,26 +32,43 @@ struct Rasterizer {
     vec4 *clip_space_vertex_positions;
     mat4 model_to_world_inverted_transposed, model_to_world, world_to_clip;
 
+    static u64 GetMemorySize(u32 max_vertex_positions, u32 max_vertex_normals) {
+        return (u64)max_vertex_positions * (sizeof(vec3) + sizeof(vec4) + 1) + sizeof(vec3) * (u64)max_vertex_normals;
+    }
+    static u64 GetMemorySize(const Scene &scene) {
+        return GetMemorySize(scene.max_vertex_positions, scene.max_vertex_normals);
+    }
+    static u64 GetMemorySize(u32 mesh_count, String *mesh_files) {
+        u32 max_vertex_positions = 0;
+        u32 max_vertex_normals = 0;
+        Mesh mesh;
+        String *mesh_file = mesh_files;
+        for (u32 i = 0; i < mesh_count; i++, mesh_file++) {
+            void *file = os::openFileForReading(mesh_file->char_ptr);
+            if (!file)
+                continue;
+            readHeader(mesh, file);
+            os::closeFile(file);
+
+            if (mesh.vertex_count  > max_vertex_positions) max_vertex_positions = mesh.vertex_count;
+            if (mesh.normals_count > max_vertex_normals) max_vertex_normals     = mesh.normals_count;
+        }
+        return GetMemorySize(max_vertex_positions, max_vertex_normals);
+    }
+
     explicit Rasterizer(Scene &scene, memory::MonotonicAllocator *memory_allocator = nullptr) : scene{scene} {
         memory::MonotonicAllocator temp_allocator;
-        u32 max_vertex_count{0}, max_normal_count{0};
-        Mesh *mesh = scene.meshes;
-        for (u32 i = 0; i < scene.counts.meshes; i++, mesh++) {
-            if (mesh->vertex_count > max_vertex_count) max_vertex_count = mesh->vertex_count;
-            if (mesh->normals_count > max_normal_count) max_normal_count = mesh->normals_count;
-        }
         if (!memory_allocator) {
-            u32 capacity = max_vertex_count * (sizeof(vec3) + sizeof(vec4) + 1) + sizeof(vec3) * max_normal_count;
-            temp_allocator = memory::MonotonicAllocator{capacity};
+            temp_allocator = memory::MonotonicAllocator{GetMemorySize(scene), Terabytes(3)};
             memory_allocator = &temp_allocator;
         }
-        vertex_flags = (u8*)memory_allocator->allocate(max_vertex_count);
-        clip_space_vertex_positions  = (vec4*)memory_allocator->allocate(sizeof(vec4) * max_vertex_count);
-        world_space_vertex_positions = (vec3*)memory_allocator->allocate(sizeof(vec3) * max_vertex_count);
-        world_space_vertex_normals = (vec3*)memory_allocator->allocate(sizeof(vec3) * max_normal_count);
+        vertex_flags = (u8*)memory_allocator->allocate(scene.max_vertex_positions);
+        clip_space_vertex_positions  = (vec4*)memory_allocator->allocate(sizeof(vec4) * scene.max_vertex_positions);
+        world_space_vertex_positions = (vec3*)memory_allocator->allocate(sizeof(vec3) * scene.max_vertex_positions);
+        world_space_vertex_normals   = (vec3*)memory_allocator->allocate(sizeof(vec3) * scene.max_vertex_normals);
     };
 
-    void rasterize(const Viewport &viewport) {
+    void rasterize(const Viewport &viewport, bool draw_wireframe = false) {
         const Camera &camera = *viewport.camera;
         const Dimensions &dim = viewport.dimensions;
         const Frustum &frustum = viewport.frustum;
@@ -61,7 +79,7 @@ struct Rasterizer {
         static vec3 world_positions[6], normals[6];
         static vec4 positions[6];
         static vec2 uvs[6], uv_in, uv_out;
-        static Shaded shaded;
+        Shaded shaded;
 
         mat4 world_to_view{Mat4(camera.rotation, camera.position).inverted()};
         mat4 view_to_clip{
@@ -73,9 +91,9 @@ struct Rasterizer {
         world_to_clip = world_to_view * view_to_clip;
 
         bool last_UV_taken;
-        f32 dot, t, one_minus_t, one_over_ABC, ABC, ABy, ABx, ACy, ACx, Cdx, Bdx, Cdy, Bdy,
+        f32 dot, t, one_minus_t, one_over_ABC, ABC, ABy, ABx, ACy, ACx, Cdx, Bdx, Cdy, Bdy, du, dv,
             A, B, B_start, C, C_start, pixel_depth;
-        u32 face_index, vertex_index, face_count, vertex_count, clipped_index,
+        u32 face_index, vertex_index, face_count, vertex_count, clipped_index, pixel_offset,
             v1_index, out1_index, in1_index, first_x, last_x,
             v2_index, out2_index, in2_index, first_y, last_y,
             v3_index;
@@ -108,7 +126,7 @@ struct Rasterizer {
         bool mesh_has_normals, mesh_has_uvs, clipping_produced_an_extra_face;
         TriangleVertexIndices position_indices, normal_indices, uvs_indices;
         Pixel *pixel;
-        PixelQuad *pixel_quad;
+        f32 *depth;
         Mesh *mesh;
         Geometry *geometry = scene.geometries;
         for (u32 geometry_id = 0; geometry_id < scene.counts.geometries; geometry_id++, geometry++) {
@@ -240,7 +258,7 @@ struct Rasterizer {
                     pos1 = Vec3(positions[0]);
                     pos2 = Vec3(positions[1]);
                     pos3 = Vec3(positions[2]);
-                    normal = (pos3 - pos1) ^ (pos2 - pos1);
+                    normal = (pos3 - pos1).cross(pos2 - pos1);
 
                     // Dot the vector from the face to the origin with the normal:
                     dot = normal.z*(pz - pos1.z) - normal.y*pos1.y - normal.x*pos1.x;
@@ -430,7 +448,7 @@ struct Rasterizer {
                                 // Determine orientation:
                                 // Compute 2 direction vectors forming a plane for the face:
                                 // Compute a normal vector of the face from these 2 direction vectors:
-                                normal = (new_v1 - Vec3(in2)) ^ (new_v2 - Vec3(in2));
+                                normal = (new_v1 - Vec3(in2)).cross(new_v2 - Vec3(in2));
 
                                 // Dot the vector from the face to the origin with the normal:
                                 dot = normal.z*(pz - in2.z) - normal.y*in2.y - normal.x*in2.x;
@@ -589,9 +607,9 @@ struct Rasterizer {
                         // Origin: Top-left
                         // Shadow rules: Top/Left
                         // Winding: CW (Flipped vertically due to top-down drawing!)
-//                    const bool exclude_edge_1 = ABy > 0;
-//                    const bool exclude_edge_2 = v2.y > v3.y;
-//                    const bool exclude_edge_3 = ACy < 0;
+                    const bool exclude_edge_1 = ABy > 0;
+                    const bool exclude_edge_2 = v2.y > v3.y;
+                    const bool exclude_edge_3 = ACy < 0;
 
                         // Compute weight constants:
                         one_over_ABC = 1.0f / ABC;
@@ -638,67 +656,77 @@ struct Rasterizer {
                                     continue;
 
                                 // If the pixel is on a shadow-edge, skip it:
-//                             if ((A == 0 && exclude_edge_1) ||
-//                                 (B == 0 && exclude_edge_2) ||
-//                                 (C == 0 && exclude_edge_3))
-//                                 continue;
-
-                                // Cull and test pixel based on its depth:
-                                if ( viewport.canvas.antialias) {
-                                    pixel_quad = viewport.canvas.pixels + ( viewport.dimensions.stride * (y >> 1)) + (x >> 1);
-                                    pixel = &pixel_quad->quad[y & 1][x & 1];
-                                } else {
-                                    pixel_quad = viewport.canvas.pixels + ( viewport.dimensions.stride * y) + x;
-                                    pixel = &pixel_quad->TL;
-                                }
-                                pixel_depth = A*v1.z + B*v2.z + C*v3.z;
-                                if (pixel_depth < 0 ||
-                                    pixel_depth > 1 ||
-                                    pixel_depth > pixel->depth)
+                                if ((A == 0 && exclude_edge_1) ||
+                                    (B == 0 && exclude_edge_2) ||
+                                    (C == 0 && exclude_edge_3))
                                     continue;
 
-                                pixel->depth = pixel_depth;
+                                // Cull and test pixel based on its depth:
+                                pixel_offset = viewport.canvas.antialias ? (
+                                        (viewport.dimensions.stride * (y >> 1)) + (x >> 1) + (y & 1) * 2 + (x & 1)
+                                        ) : (
+                                        (viewport.dimensions.stride * y) + x
+                                                );
+                                depth = viewport.canvas.depths + pixel_offset;
+                                pixel = viewport.canvas.pixels + pixel_offset;
 
                                 ABCw = {A*v1.w, B*v2.w, C*v3.w};
-                                shaded.depth = 1.0 / (f64)(ABCw.x + ABCw.y + ABCw.z);
-                                ABCp = ABCw * (f32)shaded.depth;
+                                shaded.depth = (f64)ABCw.x + (f64)ABCw.y + (f64)ABCw.z;
+                                if (shaded.depth < 0) continue;
+
+                                shaded.depth = 1.0 / shaded.depth;
+                                pixel_depth = (f32)shaded.depth;
+                                if (pixel_depth > *depth)
+                                    continue;
+
+                                ABCp = ABCw * pixel_depth;
 
                                 shaded.position = pos1.scaleAdd(ABCp.x, pos2.scaleAdd(ABCp.y, pos3 * ABCp.z));
                                 if (mesh_has_normals) shaded.normal = norm1.scaleAdd(ABCp.x, norm2.scaleAdd(ABCp.y, norm3 * ABCp.z)).normalized();
                                 if (mesh_has_uvs) {
-                                    shaded.UV = uv1.scaleAdd(ABCp.x, uv2.scaleAdd(ABCp.y, uv3 * ABCp.z));
+                                    shaded.u = fast_mul_add(uv1.u, ABCp.x, (fast_mul_add(uv2.u, ABCp.y, uv3.u * ABCp.z)));
+                                    shaded.v = fast_mul_add(uv1.v, ABCp.x, (fast_mul_add(uv2.v, ABCp.y, uv3.v * ABCp.z)));
 
                                     if (last_UV_taken) {
-                                        shaded.dUV = shaded.UV - lastUV;
+                                        du = shaded.u - lastUV.u;
+                                        dv = shaded.v - lastUV.v;
                                     } else {
                                         ABCp.y = B + Bdx;
                                         ABCp.z = C + Cdx;
-                                        ABCp.x =  v1.w * (1 - ABCp.y - ABCp.z);
+                                        ABCp.x = 1 - ABCp.y - ABCp.z;
+                                        if (ABCp.x < 0) {
+                                            ABCp.y = B - Bdx;
+                                            ABCp.z = C - Cdx;
+                                            ABCp.x = 1 - ABCp.y - ABCp.z;
+                                        }
+                                        ABCp.x *= v1.w;
                                         ABCp.y *= v2.w;
                                         ABCp.z *= v3.w;
-                                        ABCp = ABCw / (ABCp.x + ABCp.y + ABCp.z);
-                                        shaded.dUV = uv1.scaleAdd(ABCp.x, uv2.scaleAdd(ABCp.y, uv3 * ABCp.z)) - shaded.UV;
+                                        ABCp /= (ABCp.x + ABCp.y + ABCp.z);
+                                        du = fast_mul_add(uv1.u, ABCp.x, (fast_mul_add(uv2.u, ABCp.y, uv3.u * ABCp.z))) - shaded.u;
+                                        dv = fast_mul_add(uv1.v, ABCp.x, (fast_mul_add(uv2.v, ABCp.y, uv3.v * ABCp.z))) - shaded.v;
                                         last_UV_taken = true;
                                     }
 
-                                    if (shaded.dUV.u < 0) shaded.dUV.u = -shaded.dUV.u;
-                                    if (shaded.dUV.v < 0) shaded.dUV.v = -shaded.dUV.v;
-                                    lastUV = shaded.UV;
+                                    if (du < 0) du = -du;
+                                    if (dv < 0) dv = -dv;
+
+                                    shaded.uv_area = du*dv;
+
+                                    lastUV.u = shaded.u;
+                                    lastUV.v = shaded.v;
                                 }
                                 shaded.coords.x = x;
                                 shaded.coords.y = y;
                                 shaded.color = 0.0f;
                                 shaded.opacity = 1;
                                 pixel_shader(shaded, scene);
-                                shaded.color.x *= shaded.color.x;
-                                shaded.color.y *= shaded.color.y;
-                                shaded.color.z *= shaded.color.z;
                                 viewport.canvas.setPixel((i32)x, (i32)y, shaded.color, shaded.opacity, pixel_depth);
                             }
                         }
                     }
-                    if (viewport.show_wireframe || !pixel_shader) {
-                        vec3 color = Color(vertex_index ? Red : White);
+                    if (draw_wireframe || !pixel_shader) {
+                        Color color{vertex_index ? Red : White};
                         new_v1 = Vec3(positions[v1_index]);
                         new_v2 = Vec3(positions[v2_index]);
                         if (viewport.canvas.antialias) {
@@ -711,7 +739,7 @@ struct Rasterizer {
                         new_v2.z -= 0.001f;
                         drawLine(new_v1.x, new_v1.y, new_v1.z,
                                  new_v2.x, new_v2.y, new_v2.z,
-                                 viewport, color, 1, 0);
+                                 viewport.canvas, color, 1, 0);
                         new_v1 = Vec3(positions[v2_index]);
                         new_v2 = Vec3(positions[v3_index]);
                         if (viewport.canvas.antialias) {
@@ -724,7 +752,7 @@ struct Rasterizer {
                         new_v2.z -= 0.001f;
                         drawLine(new_v1.x, new_v1.y, new_v1.z,
                                  new_v2.x, new_v2.y, new_v2.z,
-                                 viewport, color, 1, 0);
+                                 viewport.canvas, color, 1, 0);
                         new_v1 = Vec3(positions[v3_index]);
                         new_v2 = Vec3(positions[v1_index]);
                         if ( viewport.canvas.antialias) {
@@ -737,7 +765,7 @@ struct Rasterizer {
                         new_v2.z -= 0.001f;
                         drawLine(new_v1.x, new_v1.y, new_v1.z,
                                  new_v2.x, new_v2.y, new_v2.z,
-                                 viewport, color, 1, 0);
+                                 viewport.canvas, color, 1, 0);
                     }
                 }
             }

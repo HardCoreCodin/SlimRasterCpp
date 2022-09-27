@@ -1,12 +1,11 @@
 #pragma once
 
 #include "./text.h"
-#include "../viewport/hud.h"
-#include "../viewport/viewport.h"
+#include "../core/hud.h"
 
-void draw(const HUD &hud, const Viewport &viewport) {
-    u16 x = (u16)hud.position.x;
-    u16 y = (u16)hud.position.y;
+void drawHUD(const HUD &hud, const Canvas &canvas, const RectI *viewport_bounds = nullptr) {
+    i32 x = hud.left;
+    i32 y = hud.top;
 
     HUDLine *line = hud.lines;
     bool alt;
@@ -18,10 +17,10 @@ void draw(const HUD &hud, const Viewport &viewport) {
         } else
             alt = false;
 
+        ColorID color = alt ? line->alternate_value_color : line->value_color;
         char *text = alt ? line->alternate_value.char_ptr : line->value.string.char_ptr;
-        vec3 color{Color(alt ? line->alternate_value_color : line->value_color)};
-        drawText(line->title.char_ptr, x, y, viewport, Color(line->title_color), 1);
-        drawText(text, x + (u16)line->title.length * FONT_WIDTH, y, viewport, color, 1);
-        y += (u16)(hud.settings.line_height * (f32)FONT_HEIGHT);
+        _drawText(line->title.char_ptr, x, y, canvas, line->title_color, 1.0f, viewport_bounds);
+        _drawText(text, x + (i32)line->title.length * FONT_WIDTH, y, canvas, color, 1.0f, viewport_bounds);
+        y += (i32)(hud.settings.line_height * (f32)FONT_HEIGHT);
     }
 }

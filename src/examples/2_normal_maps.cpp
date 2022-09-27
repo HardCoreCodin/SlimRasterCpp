@@ -8,24 +8,23 @@
 // Or using the single-header file:
 // #include "../SlimRaster.h"
 
-
-struct NormalMapsExample : SlimRaster {
+struct NormalMapsExample : SlimApp {
     // Viewport:
     Camera camera{
             {0, 15, -15},
             {-25*DEG_TO_RAD,0, 0}
     }, *cameras{&camera};
-    Viewport viewport{window::canvas, &camera};
+    Canvas canvas;
+    Viewport viewport{canvas, &camera};
+
+    bool draw_wireframe = false;
 
     HUDLine Fps{      (char*)"Fps      : "};
     HUDLine Wireframe{(char*)"Wireframe: ",
                       (char*)"Off",
                       (char*)"On",
-                      &viewport.show_wireframe, Grey};
-    HUDLine Antialias{(char*)"Antialias: ",
-                      (char*)"Off",
-                      (char*)"On",
-                      &window::canvas.antialias, Grey};
+                      &draw_wireframe, true, Grey};
+    HUDLine Antialias{(char*)"Antialias: ", Grey};
     HUDLine NormalMagnitude{(char*)"Normal Magnitude: "}, *hud_lines{&Fps};
 
     HUDSettings hud_settings{4,1.2f};
@@ -47,14 +46,14 @@ struct NormalMapsExample : SlimRaster {
     };
     Texture textures[4];
 
-    Material floor_material{shadePixelClassic, shadeMesh,2,
+    Material floor_material{shadePixelLighting, shadeMesh,2,
         vec3{0.7f}, vec3{1.0f}, 1.0f, 1.0f, 0.4f};
-    Material dog_material{  shadePixelClassic, shadeMesh, 2,
+    Material dog_material{  shadePixelLighting, shadeMesh, 2,
         vec3{0.4f}, vec3{1.0f}, 1.0f, 1.0f, 3.0f},
         *materials{&floor_material};
 
     Light light1{{  -3, 5,  8}, {0.8f, 0.3f, 0.2f}, 20};
-    Light light2{{   8, 4,  8}, {0.2f, 0.3f, 0.8f}, 20};
+    Light light2{{   3, 4,  8}, {0.2f, 0.3f, 0.8f}, 20};
     Light light3{{2.5f, 3, -1}, {0.2f, 0.9f, 0.3f}, 16},
         *lights{&light1};
 
@@ -63,9 +62,7 @@ struct NormalMapsExample : SlimRaster {
     SceneCounts counts{1, 2, 0, 1, 0, 1, 4, 4, 3};
     Scene scene{counts,nullptr, cameras, geometries,nullptr, nullptr,nullptr,
                 materials, lights, &mesh, &mesh_file, textures, texture_files};
-
     Selection selection;
-
     Rasterizer raterizer{scene};
 
     NormalMapsExample() {
@@ -82,24 +79,26 @@ struct NormalMapsExample : SlimRaster {
     }
 
     void OnRender() override {
+        canvas.clear();
         Fps.value = (i32)render_timer.average_frames_per_second;
         raterizer.rasterize(viewport);
 
-        if (controls::is_pressed::alt) draw(selection, viewport, scene);
-        if (hud.enabled) draw(hud, viewport);
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+        canvas.drawToWindow();
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
             if (controls::is_pressed::ctrl) {
-                if (key == 'W') viewport.show_wireframe = !viewport.show_wireframe;
-                if (key == 'A') viewport.canvas.antialias = !viewport.canvas.antialias;
+                if (key == 'W') draw_wireframe = !draw_wireframe;
+                if (key == 'A') viewport.canvas.antialias = viewport.canvas.antialias == NoAA ? SSAA : NoAA;
             }
         }
 
-        NavigationMove &move = viewport.navigation.move;
-        NavigationTurn &turn = viewport.navigation.turn;
+        Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
         if (key == 'Q') turn.left     = is_pressed;
         if (key == 'E') turn.right    = is_pressed;
         if (key == 'R') move.up       = is_pressed;
@@ -127,10 +126,12 @@ struct NormalMapsExample : SlimRaster {
 
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         Material &material = scene.materials[scene.geometries[selection.geo_id].material_id];
+
+        bool wheel_scroll_handled = false;
         if (controls::is_pressed::ctrl) {
             if (mouse::wheel_scrolled) {
                 mouse::wheel_scrolled = false;
-                mouse::wheel_scroll_handled = true;
+                wheel_scroll_handled = true;
                 material.normal_magnitude += mouse::wheel_scroll_amount * 0.001f;
                 material.normal_magnitude = clampedValue(material.normal_magnitude, 0, 4);
                 NormalMagnitude.value = material.normal_magnitude;
@@ -139,13 +140,15 @@ struct NormalMapsExample : SlimRaster {
 
         if (selection.changed) {
             selection.changed = false;
-            if (!mouse::wheel_scroll_handled)
+            if (!wheel_scroll_handled)
                 NormalMagnitude.value = material.normal_magnitude;
         }
     }
 
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);
+        canvas.dimensions.update(width, height);
+        dog_material.roughness = floor_material.roughness = (f32)(width >> 1);
     }
 
     void OnMouseButtonDown(mouse::Button &mouse_button) override {
@@ -162,6 +165,6 @@ struct NormalMapsExample : SlimRaster {
     }
 };
 
-SlimRaster* createEngine() {
-    return (SlimRaster*)new NormalMapsExample();
+SlimApp* createApp() {
+    return new NormalMapsExample();
 }

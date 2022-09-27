@@ -1,8 +1,9 @@
 #pragma once
 
 #include "../math/vec2.h"
-#include "../math/vec3.h"
+#include "../math/mat3.h"
 
+#include "./bvh.h"
 
 struct EdgeVertexIndices {
     u32 from, to;
@@ -15,8 +16,16 @@ union TriangleVertexIndices {
     };
 };
 
+struct Triangle {
+    mat3 local_to_tangent;
+    vec3 position, normal, U, V;
+};
+
+
 struct Mesh {
     AABB aabb;
+    BVH bvh;
+    Triangle *triangles;
 
     vec3 *vertex_positions{nullptr};
     vec3 *vertex_normals{nullptr};
@@ -52,7 +61,7 @@ struct Mesh {
 
          EdgeVertexIndices *edge_vertex_indices,
          AABB aabb
-         ) :
+    ) :
             triangle_count{triangle_count},
             vertex_count{vertex_count},
             normals_count{normals_count},
@@ -69,8 +78,9 @@ struct Mesh {
 
             edge_vertex_indices{edge_vertex_indices},
             aabb{aabb}
-         {}
+    {}
 };
+
 
 struct CubeMesh : Mesh {
     const vec3 CUBE_VERTEX_POSITIONS[CUBE_VERTEX_COUNT] = {

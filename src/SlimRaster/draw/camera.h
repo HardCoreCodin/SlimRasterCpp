@@ -3,9 +3,8 @@
 #include "./box.h"
 #include "../math/utils.h"
 #include "../scene/box.h"
-#include "../viewport/viewport.h"
 
-void draw(const Camera &camera, const Viewport &viewport, const vec3 &color = Color(White), f32 opacity = 1.0f, u8 line_width = 1) {
+void drawCamera(const Camera &camera, const Viewport &viewport, const Color &color = White, f32 opacity = 1.0f, u8 line_width = 1) {
     static Transform transform;
     static Box box;
 
@@ -13,8 +12,8 @@ void draw(const Camera &camera, const Viewport &viewport, const vec3 &color = Co
     transform.position = camera.position;
     transform.scale = 1.0f;
 
-    new(&box) Box();
-    draw(box, transform, viewport, color, opacity, line_width, BOX__ALL_SIDES);
+    box = Box{};
+    drawBox(box, transform, viewport, color, opacity, line_width, BOX__ALL_SIDES);
 
     box.vertices.corners.back_bottom_left   *= 0.5f;
     box.vertices.corners.back_bottom_right  *= 0.5f;
@@ -28,5 +27,5 @@ void draw(const Camera &camera, const Viewport &viewport, const vec3 &color = Co
     for (auto &vertex : box.vertices.buffer)
         vertex.z += 1.5f;
 
-    draw(box, transform, viewport, color, opacity, line_width, BOX__ALL_SIDES);
+    drawBox(box, transform, viewport, color, opacity, line_width, BOX__ALL_SIDES);
 }

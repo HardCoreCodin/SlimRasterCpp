@@ -1,57 +1,103 @@
 #pragma once
 
-#ifdef __cplusplus
 #include <cmath>
-#else
-#include <math.h>
-#endif
 
 #if defined(__clang__)
-#define COMPILER_CLANG 1
-#define COMPILER_CLANG_OR_GCC 1
+    #define COMPILER_CLANG 1
+    #define COMPILER_CLANG_OR_GCC 1
 #elif defined(__GNUC__) || defined(__GNUG__)
-#define COMPILER_GCC 1
+    #define COMPILER_GCC 1
     #define COMPILER_CLANG_OR_GCC 1
 #elif defined(_MSC_VER)
     #define COMPILER_MSVC 1
 #endif
 
-#ifndef NDEBUG
-#define INLINE
-#elif defined(COMPILER_MSVC)
-#define INLINE inline __forceinline
-#elif defined(COMPILER_CLANG_OR_GCC)
-    #define INLINE inline __attribute__((always_inline))
+#ifdef __CUDACC__
+    #ifndef NDEBUG
+        #include <stdio.h>
+        #include <stdlib.h>
+        inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
+            if (code != cudaSuccess) {
+                fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code) , file, line);
+                if (abort) exit(code);
+            }
+        }
+        #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+        #ifndef XPU
+            #define XPU __device__ __host__
+        #endif
+        #ifndef INLINE_XPU
+            #define INLINE_XPU __device__ __host__
+        #endif
+        #ifndef INLINE
+            #define INLINE
+        #endif
+    #else
+        #ifndef XPU
+            #define XPU __device__ __host__
+        #endif
+        #ifndef INLINE_XPU
+            #define INLINE_XPU __device__ __host__ __forceinline__
+        #endif
+        #ifndef INLINE
+            #define INLINE __forceinline__
+        #endif
+        #define gpuErrchk(ans) (ans);
+    #endif
+
+    #define checkErrors() gpuErrchk(cudaPeekAtLastError())
+    #define uploadNto(cpu_ptr, gpu_ptr, N, offset) gpuErrchk(cudaMemcpy(&((gpu_ptr)[(offset)]), (cpu_ptr), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyHostToDevice))
+    #define uploadN(  cpu_ptr, gpu_ptr, N        ) gpuErrchk(cudaMemcpy(&((gpu_ptr)[0])       , (cpu_ptr), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyHostToDevice))
+    #define downloadN(gpu_ptr, cpu_ptr, N)         gpuErrchk(cudaMemcpy((cpu_ptr), &((gpu_ptr)[0])       , sizeof((cpu_ptr)[0]) * (N), cudaMemcpyDeviceToHost))
+    #define downloadNto(gpu_ptr,cpu_ptr,N, offset) gpuErrchk(cudaMemcpy((cpu_ptr), &((gpu_ptr)[(offset)]), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyDeviceToHost))
 #else
-    #define INLINE inline
+    #ifndef XPU
+        #define XPU
+    #endif
+    #ifndef INLINE
+        #if (defined(SLIMMER) || !defined(NDEBUG))
+            #define INLINE
+        #elif defined(COMPILER_MSVC)
+            #define INLINE inline __forceinline
+        #elif defined(COMPILER_CLANG_OR_GCC)
+            #define INLINE inline __attribute__((always_inline))
+        #else
+            #define INLINE inline
+        #endif
+    #endif
+    #ifndef INLINE_XPU
+        #define INLINE_XPU INLINE
+    #endif
+#endif
+
+#if defined(COMPILER_CLANG)
+    #define likely(x)   __builtin_expect(x, true)
+    #define unlikely(x) __builtin_expect_with_probability(x, false, 0.95)
+#else
+    #define likely(x)   x
+    #define unlikely(x) x
 #endif
 
 #ifdef COMPILER_CLANG
-#define ENABLE_FP_CONTRACT \
+    #define ENABLE_FP_CONTRACT \
         _Pragma("clang diagnostic push") \
         _Pragma("clang diagnostic ignored \"-Wunknown-pragmas\"") \
         _Pragma("STDC FP_CONTRACT ON") \
         _Pragma("clang diagnostic pop")
 #else
-#define ENABLE_FP_CONTRACT
+    #define ENABLE_FP_CONTRACT
 #endif
 
 #ifdef FP_FAST_FMAF
-#define fast_mul_add(a, b, c) fmaf(a, b, c)
+    #define fast_mul_add(a, b, c) fmaf(a, b, c)
 #else
-ENABLE_FP_CONTRACT
-#define fast_mul_add(a, b, c) ((a) * (b) + (c))
+    ENABLE_FP_CONTRACT
+    #define fast_mul_add(a, b, c) ((a) * (b) + (c))
 #endif
 
-#ifdef __cplusplus
-    #define null nullptr
-    #ifndef signbit
-        #define signbit std::signbit
-    #endif
-#else
-    #define null 0
-    typedef unsigned char      bool;
- #endif
+#ifndef signbit
+    #define signbit std::signbit
+#endif
 
 typedef unsigned char      u8;
 typedef unsigned short     u16;
@@ -63,12 +109,12 @@ typedef signed   long int  i32;
 typedef float  f32;
 typedef double f64;
 
-#define FONT_WIDTH 18
-#define FONT_HEIGHT 24
+#ifndef CANVAS_COUNT
+#define CANVAS_COUNT 2
+#endif
 
-typedef void* (*CallbackWithInt)(u64 size);
-typedef void (*CallbackWithBool)(bool on);
-typedef void (*CallbackWithCharPtr)(char* str);
+#define FONT_WIDTH 9
+#define FONT_HEIGHT 12
 
 #define TAU 6.28f
 #define SQRT2_OVER_2 0.70710678118f
@@ -97,25 +143,20 @@ typedef void (*CallbackWithCharPtr)(char* str);
 #define DEFAULT_WIDTH 480
 #define DEFAULT_HEIGHT 360
 
-#define PIXEL_SIZE 4
-#define WINDOW_CONTENT_SIZE (MAX_WINDOW_SIZE * PIXEL_SIZE)
+#define WINDOW_CONTENT_PIXEL_SIZE 4
+#define WINDOW_CONTENT_SIZE (MAX_WINDOW_SIZE * WINDOW_CONTENT_PIXEL_SIZE)
 
-#define BOX__ALL_SIDES (Top | Bottom | Left | Right | Front | Back)
+#define BOX__ALL_SIDES (BoxSide_Top | BoxSide_Bottom | BoxSide_Left | BoxSide_Right | BoxSide_Front | BoxSide_Back)
 #define BOX__VERTEX_COUNT 8
 #define BOX__EDGE_COUNT 12
 #define GRID__MAX_SEGMENTS 101
+
+#define CURVE_STEPS 360
 
 #define CUBE_UV_COUNT 4
 #define CUBE_NORMAL_COUNT 6
 #define CUBE_VERTEX_COUNT 8
 #define CUBE_TRIANGLE_COUNT 12
-
-#define IS_VISIBLE ((u8)1)
-#define IS_TRANSLATED ((u8)2)
-#define IS_ROTATED ((u8)4)
-#define IS_SCALED ((u8)8)
-#define IS_SCALED_NON_UNIFORMLY ((u8)16)
-#define ALL_FLAGS (IS_VISIBLE | IS_TRANSLATED | IS_ROTATED | IS_SCALED | IS_SCALED_NON_UNIFORMLY)
 
 #define CAMERA_DEFAULT__FOCAL_LENGTH 2.0f
 #define CAMERA_DEFAULT__TARGET_DISTANCE 10
@@ -132,63 +173,43 @@ typedef void (*CallbackWithCharPtr)(char* str);
 #define VIEWPORT_DEFAULT__NEAR_CLIPPING_PLANE_DISTANCE 0.001f
 #define VIEWPORT_DEFAULT__FAR_CLIPPING_PLANE_DISTANCE 1000.0f
 
-#include <cmath>
-
 #define fractionOf(x) ((x) - floorf(x))
 #define oneMinusFractionOf(x) (1 - fractionOf(x))
 
-INLINE f32 clampedValue(f32 value, f32 from, f32 to) {
+INLINE_XPU f32 clampedValue(f32 value, f32 from, f32 to) {
     f32 mn = value < to ? value : to;
     return mn > from ? mn : from;
 }
 
-INLINE i32 clampedValue(i32 value, i32 from, i32 to) {
+INLINE_XPU i32 clampedValue(i32 value, i32 from, i32 to) {
     i32 mn = value < to ? value : to;
     return mn > from ? mn : from;
 }
 
-INLINE f32 clampedValue(f32 value, f32 to) {
+INLINE_XPU f32 clampedValue(f32 value, f32 to) {
     return value < to ? value : to;
 }
 
-INLINE i32 clampedValue(i32 value, i32 to) {
+INLINE_XPU i32 clampedValue(i32 value, i32 to) {
     return value < to ? value : to;
 }
 
-INLINE f32 clampedValue(f32 value) {
+INLINE_XPU f32 clampedValue(f32 value) {
     f32 mn = value < 1.0f ? value : 1.0f;
     return mn > 0.0f ? mn : 0.0f;
 }
 
-INLINE i32 clampedValue(i32 value) {
+INLINE_XPU i32 clampedValue(i32 value) {
     i32 mn = value < 1 ? value : 1;
     return mn > 0 ? mn : 0;
 }
 
-INLINE void swap(i32 *a, i32 *b) {
-    i32 t = *a;
-    *a = *b;
-    *b = t;
-}
-
-INLINE void subRange(i32 from, i32 to, i32 end, i32 start, i32 *first, i32 *last) {
-    *first = from;
-    *last  = to;
-    if (to < from) swap(first, last);
-    *first = *first > start ? *first : start;
-    *last  = (*last < end ? *last : end) - 1;
-}
-
-INLINE bool inRange(i32 value, i32 end, i32 start = 0) {
-    return start <= value && value < end;
-}
-
-INLINE f32 smoothStep(f32 from, f32 to, f32 t) {
+INLINE_XPU f32 smoothStep(f32 from, f32 to, f32 t) {
     t = (t - from) / (to - from);
     return t * t * (3.0f - 2.0f * t);
 }
 
-INLINE f32 approach(f32 src, f32 trg, f32 diff) {
+INLINE_XPU f32 approach(f32 src, f32 trg, f32 diff) {
     f32 out;
 
     out = src + diff; if (trg > out) return out;
@@ -197,16 +218,124 @@ INLINE f32 approach(f32 src, f32 trg, f32 diff) {
     return trg;
 }
 
-enum class CurveType {
-    None = 0,
+template <typename T>
+INLINE void swap(T *a, T *b) {
+    T t = *a;
+    *a = *b;
+    *b = t;
+}
 
-    Helix,
-    Coil,
+template <typename T>
+struct RangeOf {
+    T first, last;
 
-    Count
+    RangeOf() : RangeOf{0, 0} {}
+    RangeOf(T first, T last) : first{first}, last{last} {}
+    RangeOf(const RangeOf<T> &other) : RangeOf{other.first, other.last} {}
+
+    INLINE bool contains(i32 v) const { return (first <= v) && (v <= last); }
+    INLINE bool bounds(i32 v) const { return (first < v) && (v < last); }
+    INLINE bool operator!() const { return last < first; }
+    INLINE bool operator[](T v) const { return contains(v); }
+    INLINE bool operator()(T v) const { return bounds(v); }
+    INLINE void operator+=(T offset) {first += offset; last += offset;}
+    INLINE void operator-=(T offset) {first -= offset; last -= offset;}
+    INLINE void operator*=(T factor) {first *= factor; last *= factor;}
+    INLINE void operator/=(T factor) {factor = 1 / factor; first *= factor; last *= factor;}
+    INLINE void operator-=(const RangeOf<T> &rhs) { sub(rhs.first, rhs.last); }
+    INLINE RangeOf<T> operator-(const RangeOf<T> &rhs) const {
+        RangeOf<T> result{first, last};
+        result.sub(rhs.first, rhs.last);
+        return result;
+    }
+    INLINE void sub(T sub_first, T sub_last) {
+        if (sub_last < sub_first) {
+            T tmp = sub_last;
+            sub_last = sub_first;
+            sub_first = tmp;
+        }
+        if (last < sub_first || sub_last < first) {
+            first = -1;
+            last = -2;
+        } else {
+            first = first < sub_first ? sub_first : first;
+            last = sub_last < last ? sub_last : last;
+        }
+    }
+};
+typedef RangeOf<f32> Range;
+typedef RangeOf<i32> RangeI;
+
+template <typename T>
+struct RectOf {
+    union {
+        struct {
+            T left;
+            T right;
+            T top;
+            T bottom;
+        };
+        struct {
+            RangeOf<T> x_range, y_range;
+        };
+    };
+
+    RectOf(const RectOf<T> &other) : RectOf{other.x_range, other.y_range} {}
+    RectOf(const RangeOf<T> &x_range, const RangeOf<T> &y_range) : x_range{x_range}, y_range{y_range} {}
+    RectOf(T left = 0, T right = 0, T top = 0, T bottom = 0) : left{left}, right{right}, top{top}, bottom{bottom} {}
+
+    INLINE bool contains(T x, T y) const { return x_range.contains(x) && y_range.contains(y); }
+    INLINE bool bounds(T x, T y) const { return x_range.bounds(x) && y_range.bounds(y); }
+    INLINE bool operator!() const { return !x_range || !y_range; }
+    INLINE bool isOutsideOf(const RectOf<T> &other) {
+        return (
+                other.right < left || right < other.left ||
+                other.bottom < top || bottom < other.top
+        );
+    }
+    INLINE void operator+=(T offset) {x_range += offset; y_range += offset;}
+    INLINE void operator-=(T offset) {x_range -= offset; y_range -= offset;}
+    INLINE void operator*=(T factor) {x_range *= factor; y_range *= factor;}
+    INLINE void operator/=(T factor) {x_range /= factor; y_range /= factor;}
+    INLINE void operator-=(const RectOf<T> &rhs) { sub(rhs.x_range, rhs.y_range); }
+    INLINE RectOf<T> operator-(const RectOf<T> &rhs) const {
+        RectOf<T> result{x_range, y_range};
+        result.sub(rhs.x_range, rhs.y_range);
+        return result;
+    }
+    INLINE void sub(const RangeOf<T> &other_x_range, const RangeOf<T> &other_y_range) {
+        x_range -= other_x_range;
+        y_range -= other_y_range;
+    }
+};
+typedef RectOf<f32> Rect;
+typedef RectOf<i32> RectI;
+
+struct Turn {
+    bool right{false};
+    bool left{false};
+};
+
+struct Move {
+    bool right{false};
+    bool left{false};
+    bool up{false};
+    bool down{false};
+    bool forward{false};
+    bool backward{false};
+};
+
+enum CurveType {
+    CurveType_None = 0,
+
+    CurveType_Helix,
+    CurveType_Coil,
+    CurveType_Sphere,
+
+    CurveType_Count
 };
 struct Curve {
-    CurveType type{CurveType::None};
+    CurveType type{CurveType_None};
     f32 revolution_count{1}, thickness{0.1f};
 };
 
@@ -221,70 +350,76 @@ enum GeometryType {
     GeometryType_Count
 };
 
-enum BoxSide {
-    NoSide = 0,
-    Top    = 1,
-    Bottom = 2,
-    Left   = 4,
-    Right  = 8,
-    Front  = 16,
-    Back   = 32
+
+enum Axis {
+    Axis_X = 1,
+    Axis_Y = 2,
+    Axis_Z = 4
 };
 
+enum BoxSide {
+    BoxSide_None = 0,
+    BoxSide_Top  = 1,
+    BoxSide_Bottom = 2,
+    BoxSide_Left   = 4,
+    BoxSide_Right  = 8,
+    BoxSide_Front  = 16,
+    BoxSide_Back   = 32
+};
 
 template <class T>
 struct Orientation {
     T rotation{};
 
-    Orientation() : rotation{T::Identity} {}
-    explicit Orientation(f32 x_radians, f32 y_radians = 0, f32 z_radians = 0) {
+    INLINE_XPU Orientation() : rotation{T::Identity} {}
+    INLINE_XPU explicit Orientation(f32 x_radians, f32 y_radians = 0, f32 z_radians = 0) {
         setRotation(x_radians, y_radians, z_radians);
     }
 
-    INLINE void rotate(f32 x_radians, f32 y_radians, f32 z_radians) {
+    INLINE_XPU void rotate(f32 x_radians, f32 y_radians, f32 z_radians) {
         setRotation(x + x_radians, y + y_radians, x + z_radians);
     }
 
-    INLINE void rotate(f32 x_radians, f32 y_radians) {
+    INLINE_XPU void rotate(f32 x_radians, f32 y_radians) {
         setRotation(x + x_radians, y + y_radians);
     }
 
-    INLINE void setRotation(f32 x_radians, f32 y_radians, f32 z_radians) {
+    INLINE_XPU void setRotation(f32 x_radians, f32 y_radians, f32 z_radians) {
         x = x_radians;
         y = y_radians;
         z = z_radians;
         _update();
     }
 
-    INLINE void setRotation(f32 x_radians, f32 y_radians) {
+    INLINE_XPU void setRotation(f32 x_radians, f32 y_radians) {
         x = x_radians;
         y = y_radians;
         _update();
     }
 
-    INLINE void rotateAroundX(f32 radians) {
+    INLINE_XPU void rotateAroundX(f32 radians) {
         setRotationAroundX(x + radians);
     }
 
-    INLINE void rotateAroundY(f32 radians) {
+    INLINE_XPU void rotateAroundY(f32 radians) {
         setRotationAroundY(y + radians);
     }
 
-    INLINE void rotateAroundZ(f32 radians) {
+    INLINE_XPU void rotateAroundZ(f32 radians) {
         setRotationAroundZ(z + radians);
     }
 
-    INLINE void setRotationAroundX(f32 radians) {
+    INLINE_XPU void setRotationAroundX(f32 radians) {
         x = radians;
         _update();
     }
 
-    INLINE void setRotationAroundY(f32 radians) {
+    INLINE_XPU void setRotationAroundY(f32 radians) {
         y = radians;
         _update();
     }
 
-    INLINE void setRotationAroundZ(f32 radians) {
+    INLINE_XPU void setRotationAroundZ(f32 radians) {
         z = radians;
         _update();
     }
@@ -292,8 +427,8 @@ struct Orientation {
 protected:
     f32 x, y, z;
 
-    void _update() {
-        rotation = T::Identity;
+    INLINE_XPU void _update() {
+        rotation = T{};
         if (z != 0.0f) rotation = T::RotationAroundZ(z);
         if (x != 0.0f) rotation *= T::RotationAroundX(x);
         if (y != 0.0f) rotation *= T::RotationAroundY(y);
@@ -332,116 +467,330 @@ enum ColorID {
     DarkYellow
 };
 
-union RGBA {
-    u32 value;
-    struct {
-        u8 B, G, R, A;
+struct Color {
+    union {
+        struct { f32 red, green, blue; };
+        struct { f32 r  , g    , b   ; };
     };
 
-    RGBA() : RGBA{0, 0, 0, MAX_COLOR_VALUE} {}
-    RGBA(u8 r, u8 g, u8 b, u8 a) : B{b}, G{g}, R{r}, A{a} {}
-
-    RGBA(enum ColorID color_id) : RGBA{0, 0, 0, MAX_COLOR_VALUE} {
+    INLINE_XPU Color(f32 value) : red{value}, green{value}, blue{value} {}
+    INLINE_XPU Color(f32 red = 0.0f, f32 green = 0.0f, f32 blue = 0.0f) : red{red}, green{green}, blue{blue} {}
+    INLINE_XPU Color(enum ColorID color_id) : Color{} {
         switch (color_id) {
             case Black: break;
             case White:
-                R = MAX_COLOR_VALUE;
-                G = MAX_COLOR_VALUE;
-                B = MAX_COLOR_VALUE;
+                red = 1.0f;
+                green = 1.0f;
+                blue = 1.0f;
                 break;
             case Grey:
-                R = HALF_COLOR_VALUE;
-                G = HALF_COLOR_VALUE;
-                B = HALF_COLOR_VALUE;
+                red = 0.5f;
+                green = 0.5f;
+                blue = 0.5f;
                 break;
             case DarkGrey:
-                R = QUARTER_COLOR_VALUE;
-                G = QUARTER_COLOR_VALUE;
-                B = QUARTER_COLOR_VALUE;
+                red = 0.25f;
+                green = 0.25f;
+                blue = 0.25f;
                 break;
             case BrightGrey:
-                R = THREE_QUARTERS_COLOR_VALUE;
-                G = THREE_QUARTERS_COLOR_VALUE;
-                B = THREE_QUARTERS_COLOR_VALUE;
+                red = 0.75f;
+                green = 0.75f;
+                blue = 0.75f;
                 break;
 
             case Red:
-                R = MAX_COLOR_VALUE;
+                red = 1.0f;
                 break;
             case Green:
-                G = MAX_COLOR_VALUE;
+                green = 1.0f;
                 break;
             case Blue:
-                B = MAX_COLOR_VALUE;
+                blue = 1.0f;
                 break;
 
             case DarkRed:
-                R = HALF_COLOR_VALUE;
+                red = 0.5f;
                 break;
             case DarkGreen:
-                G = HALF_COLOR_VALUE;
+                green = 0.5f;
                 break;
             case DarkBlue:
-                B = HALF_COLOR_VALUE;
+                blue = 0.5f;
                 break;
 
             case DarkCyan:
-                G = HALF_COLOR_VALUE;
-                B = HALF_COLOR_VALUE;
+                green = 0.5f;
+                blue = 0.5f;
                 break;
             case DarkMagenta:
-                R = HALF_COLOR_VALUE;
-                B = HALF_COLOR_VALUE;
+                red = 0.5f;
+                blue = 0.5f;
                 break;
             case DarkYellow:
-                R = HALF_COLOR_VALUE;
-                G = HALF_COLOR_VALUE;
+                red = 0.5f;
+                green = 0.5f;
                 break;
 
             case BrightRed:
-                R = MAX_COLOR_VALUE;
-                G = HALF_COLOR_VALUE;
-                B = HALF_COLOR_VALUE;
+                red = 1.0f;
+                green = 0.5f;
+                blue = 0.5f;
                 break;
             case BrightGreen:
-                R = HALF_COLOR_VALUE;
-                G = MAX_COLOR_VALUE;
-                B = HALF_COLOR_VALUE;
+                red = 0.5f;
+                green = 1.0f;
+                blue = 0.5f;
                 break;
             case BrightBlue:
-                R = HALF_COLOR_VALUE;
-                G = HALF_COLOR_VALUE;
-                B = MAX_COLOR_VALUE;
+                red = 0.5f;
+                green = 0.5f;
+                blue = 1.0f;
                 break;
 
             case Cyan:
-                B = MAX_COLOR_VALUE;
-                G = MAX_COLOR_VALUE;
+                blue = 1.0f;
+                green = 1.0f;
                 break;
             case Magenta:
-                R = MAX_COLOR_VALUE;
-                B = MAX_COLOR_VALUE;
+                red = 1.0f;
+                blue = 1.0f;
                 break;
             case Yellow:
-                R = MAX_COLOR_VALUE;
-                G = MAX_COLOR_VALUE;
+                red = 1.0f;
+                green = 1.0f;
                 break;
 
             case BrightCyan:
-                G = THREE_QUARTERS_COLOR_VALUE;
-                B = THREE_QUARTERS_COLOR_VALUE;
+                green = 0.75f;
+                blue = 0.75f;
                 break;
             case BrightMagenta:
-                R = THREE_QUARTERS_COLOR_VALUE;
-                B = THREE_QUARTERS_COLOR_VALUE;
+                red = 0.75f;
+                blue = 0.75f;
                 break;
             case BrightYellow:
-                R = THREE_QUARTERS_COLOR_VALUE;
-                G = THREE_QUARTERS_COLOR_VALUE;
+                red = 0.75f;
+                green = 0.75f;
                 break;
         }
     }
+
+    INLINE_XPU Color clamped() const {
+        return {
+            clampedValue(r),
+            clampedValue(g),
+            clampedValue(b)
+        };
+    }
+
+    INLINE_XPU  void setByHex(i32 hex) {
+        r = (float)((0xFF0000 & hex) >> 16) * COLOR_COMPONENT_TO_FLOAT;
+        g = (float)((0x00FF00 & hex) >>  8) * COLOR_COMPONENT_TO_FLOAT;
+        b = (float)( 0x0000FF & hex)        * COLOR_COMPONENT_TO_FLOAT;
+    }
+
+    INLINE_XPU Color& operator = (f32 value) {
+        r = g = b = value;
+        return *this;
+    }
+
+    INLINE_XPU Color& operator = (ColorID color_id) {
+        *this  = Color(color_id);
+        return *this;
+    }
+
+    INLINE_XPU Color operator + (const Color &rhs) const {
+        return {
+                r + rhs.r,
+                g + rhs.g,
+                b + rhs.b
+        };
+    }
+
+    INLINE_XPU Color operator + (f32 scalar) const {
+        return {
+                r + scalar,
+                g + scalar,
+                b + scalar
+        };
+    }
+
+    INLINE_XPU Color& operator += (const Color &rhs) {
+        r += rhs.r;
+        g += rhs.g;
+        b += rhs.b;
+        return *this;
+    }
+
+    INLINE_XPU Color& operator += (f32 scalar) {
+        r += scalar;
+        g += scalar;
+        b += scalar;
+        return *this;
+    }
+
+    INLINE_XPU Color operator - (const Color &rhs) const {
+        return {
+                r - rhs.r,
+                g - rhs.g,
+                b - rhs.b
+        };
+    }
+
+    INLINE_XPU Color operator - (f32 scalar) const {
+        return {
+                r - scalar,
+                g - scalar,
+                b - scalar
+        };
+    }
+
+    INLINE_XPU Color& operator -= (const Color &rhs) {
+        r -= rhs.r;
+        g -= rhs.g;
+        b -= rhs.b;
+        return *this;
+    }
+
+    INLINE_XPU Color& operator -= (f32 scalar) {
+        r -= scalar;
+        g -= scalar;
+        b -= scalar;
+        return *this;
+    }
+
+    INLINE_XPU Color operator * (const Color &rhs) const {
+        return {
+            r * rhs.r,
+            g * rhs.g,
+            b * rhs.b
+        };
+    }
+
+    INLINE_XPU Color operator * (f32 scalar) const {
+        return {
+            r * scalar,
+            g * scalar,
+            b * scalar
+        };
+    }
+
+    INLINE_XPU Color& operator *= (const Color &rhs) {
+        r *= rhs.r;
+        g *= rhs.g;
+        b *= rhs.b;
+        return *this;
+    }
+
+    INLINE_XPU Color& operator *= (f32 scalar) {
+        r *= scalar;
+        g *= scalar;
+        b *= scalar;
+        return *this;
+    }
+
+    INLINE_XPU Color operator / (const Color &rhs) const {
+        return {
+                r / rhs.r,
+                g / rhs.g,
+                b / rhs.b
+        };
+    }
+
+    INLINE_XPU Color operator / (f32 scalar) const {
+        scalar = 1.0f / scalar;
+        return {
+                r * scalar,
+                g * scalar,
+                b * scalar
+        };
+    }
+
+    INLINE_XPU Color& operator /= (const Color &rhs) {
+        r /= rhs.r;
+        g /= rhs.g;
+        b /= rhs.b;
+        return *this;
+    }
+
+    INLINE_XPU Color& operator /= (f32 scalar) {
+        scalar = 1.0f / scalar;
+        r *= scalar;
+        g *= scalar;
+        b *= scalar;
+        return *this;
+    }
+
+    INLINE_XPU Color lerpTo(const Color &to, f32 by) const {
+        return (to - *this).scaleAdd(by, *this);
+    }
+
+    INLINE_XPU Color scaleAdd(f32 factor, const Color &to_be_added) const {
+        return {
+                fast_mul_add(r, factor, to_be_added.r),
+                fast_mul_add(g, factor, to_be_added.g),
+                fast_mul_add(b, factor, to_be_added.b)
+        };
+    }
 };
+
+struct Pixel {
+    Color color;
+    f32 opacity;
+
+    INLINE_XPU Pixel(Color color, f32 opacity = 1.0f) : color{color}, opacity{opacity} {}
+    INLINE_XPU Pixel(f32 red = 0.0f, f32 green = 0.0f, f32 blue = 0.0f, f32 opacity = 0.0f) : color{red, green, blue}, opacity{opacity} {}
+    INLINE_XPU Pixel(enum ColorID color_id, f32 opacity = 1.0f) : Pixel{Color(color_id), opacity} {}
+
+    INLINE_XPU Pixel operator * (f32 factor) const {
+        return {
+            color * factor,
+            opacity * factor
+        };
+    }
+
+    INLINE_XPU Pixel operator + (const Pixel &rhs) const {
+        return {
+            color + rhs.color,
+            opacity + rhs.opacity
+        };
+    }
+
+    INLINE_XPU Pixel& operator += (const Pixel &rhs) {
+        color += rhs.color;
+        opacity += rhs.opacity;
+        return *this;
+    }
+
+    INLINE_XPU Pixel& operator *= (const Pixel &rhs) {
+        color *= rhs.color;
+        opacity *= rhs.opacity;
+        return *this;
+    }
+
+    INLINE_XPU Pixel alphaBlendOver(const Pixel &background) const {
+        return *this + background * (1.0f - opacity);
+    }
+
+    INLINE_XPU u32 asContent() const {
+        u8 R = (u8)(color.r > 1.0f ? MAX_COLOR_VALUE : (FLOAT_TO_COLOR_COMPONENT * sqrt(color.r)));
+        u8 G = (u8)(color.g > 1.0f ? MAX_COLOR_VALUE : (FLOAT_TO_COLOR_COMPONENT * sqrt(color.g)));
+        u8 B = (u8)(color.b > 1.0f ? MAX_COLOR_VALUE : (FLOAT_TO_COLOR_COMPONENT * sqrt(color.b)));
+        return R << 16 | G << 8 | B;
+    }
+};
+
+struct Image {
+    u16 width, height;
+    Pixel *pixels;
+    Pixel* operator[] (int row) const { return pixels + row*width; }
+};
+
+#define PIXEL_SIZE (sizeof(Pixel))
+#define CANVAS_PIXELS_SIZE (MAX_WINDOW_SIZE * PIXEL_SIZE * 4)
+#define CANVAS_DEPTHS_SIZE (MAX_WINDOW_SIZE * sizeof(f32) * 4)
+#define CANVAS_SIZE (CANVAS_PIXELS_SIZE + CANVAS_DEPTHS_SIZE)
 
 struct Dimensions {
     u32 width_times_height{(u32)DEFAULT_WIDTH * (u32)DEFAULT_HEIGHT};
@@ -512,7 +861,7 @@ namespace controls {
 }
 
 namespace os {
-    void* getMemory(u64 size);
+    void* getMemory(u64 size, u64 base = 0);
     void setWindowTitle(char* str);
     void setWindowCapture(bool on);
     void setCursorVisibility(bool on);
@@ -523,7 +872,7 @@ namespace os {
     bool writeToFile(void *out, unsigned long, void *handle);
 }
 
-namespace time {
+namespace timers {
     u64 getTicks();
     u64 ticks_per_second;
     f64 seconds_per_tick;
@@ -554,7 +903,7 @@ namespace time {
         u16 average_microseconds_per_frame{0};
         u16 average_nanoseconds_per_frame{0};
 
-        Timer() noexcept : ticks_before{getTicks()}, ticks_of_last_report{getTicks()} {};
+        Timer() noexcept : ticks_before{getTicks()}, ticks_after{getTicks()}, ticks_of_last_report{getTicks()} {};
 
         INLINE void accumulate() {
             ticks_diff = ticks_after - ticks_before;
@@ -578,7 +927,6 @@ namespace time {
         }
 
         INLINE void beginFrame() {
-            ticks_after = ticks_before;
             ticks_before = getTicks();
             ticks_diff = ticks_before - ticks_after;
             delta_time = (f32) ((f64) ticks_diff * seconds_per_tick);
@@ -597,11 +945,10 @@ namespace mouse {
     struct Button {
         i32 down_pos_x, down_pos_y, up_pos_x, up_pos_y, double_click_pos_x, double_click_pos_y;
 
-        bool is_pressed{false}, is_handled{false}, double_clicked{false};
+        bool is_pressed{false}, double_clicked{false};
 
         void down(i32 x, i32 y) {
             is_pressed = true;
-            is_handled = false;
 
             down_pos_x = x;
             down_pos_y = y;
@@ -609,7 +956,6 @@ namespace mouse {
 
         void up(i32 x, i32 y) {
             is_pressed = false;
-            is_handled = false;
 
             up_pos_x = x;
             up_pos_y = y;
@@ -623,37 +969,25 @@ namespace mouse {
     };
 
     Button middle_button, right_button, left_button;
+
     i32 pos_x, pos_y, pos_raw_diff_x, pos_raw_diff_y, movement_x, movement_y;
     f32 wheel_scroll_amount{0};
 
     bool moved{false};
     bool is_captured{false};
-    bool move_handled{false};
     bool double_clicked{false};
-    bool double_clicked_handled{false};
     bool wheel_scrolled{false};
-    bool wheel_scroll_handled{false};
-    bool raw_movement_handled{false};
 
     void resetChanges() {
-        if (move_handled) {
-            move_handled = false;
-            moved = false;
-        }
-        if (double_clicked_handled) {
-            double_clicked_handled = false;
-            double_clicked = false;
-        }
-        if (raw_movement_handled) {
-            raw_movement_handled = false;
-            pos_raw_diff_x = 0;
-            pos_raw_diff_y = 0;
-        }
-        if (wheel_scroll_handled) {
-            wheel_scroll_handled = false;
-            wheel_scrolled = false;
-            wheel_scroll_amount = 0;
-        }
+        moved = false;
+        double_clicked = false;
+        wheel_scrolled = false;
+        wheel_scroll_amount = 0;
+        pos_raw_diff_x = 0;
+        pos_raw_diff_y = 0;
+        right_button.double_clicked = false;
+        left_button.double_clicked = false;
+        middle_button.double_clicked = false;
     }
 
     void scroll(f32 amount) {
@@ -679,19 +1013,10 @@ namespace mouse {
     }
 }
 
-namespace os {
-    void* getMemory(u64 size);
-    void setWindowTitle(char* str);
-    void setWindowCapture(bool on);
-    void setCursorVisibility(bool on);
-    void closeFile(void *handle);
-    void* openFileForReading(const char* file_path);
-    void* openFileForWriting(const char* file_path);
-    bool readFromFile(void *out, unsigned long, void *handle);
-    bool writeToFile(void *out, unsigned long, void *handle);
-}
-
 namespace memory {
+    u8 *canvas_memory{nullptr};
+    u64 canvas_memory_capacity = CANVAS_SIZE * CANVAS_COUNT;
+
     typedef void* (*AllocateMemory)(u64 size);
 
     struct MonotonicAllocator {
@@ -701,9 +1026,9 @@ namespace memory {
 
         MonotonicAllocator() = default;
 
-        explicit MonotonicAllocator(u64 Capacity) {
+        explicit MonotonicAllocator(u64 Capacity, u64 starting = 0) {
             capacity = Capacity;
-            address = (u8*)os::getMemory(Capacity);
+            address = (u8*)os::getMemory(Capacity, starting);
         }
 
         void* allocate(u64 size) {
@@ -716,4 +1041,11 @@ namespace memory {
             return current_address;
         }
     };
+}
+
+namespace window {
+    u16 width{DEFAULT_WIDTH};
+    u16 height{DEFAULT_HEIGHT};
+    char* title{(char*)""};
+    u32 *content{nullptr};
 }

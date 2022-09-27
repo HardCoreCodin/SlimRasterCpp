@@ -20,9 +20,9 @@ INLINE vec3 shadePointOnSurface(const Shaded &shaded, f32 NdotL) {
         vec3 half_vector, color;
         if (material_uses.blinn) {
             half_vector = (shaded.light_direction - shaded.viewing_direction).normalized();
-            color = shaded.material->specular * powf(clampedValue(shaded.normal | half_vector), 16.0f * shaded.material->shininess);
+            color = shaded.material->specular * powf(clampedValue(shaded.normal.dot(half_vector)), 16.0f * shaded.material->shininess);
         } else
-            color = shaded.material->specular * powf(clampedValue(shaded.reflected_direction | shaded.light_direction), 4.0f * shaded.material->shininess);
+            color = shaded.material->specular * powf(clampedValue(shaded.reflected_direction.dot(shaded.light_direction)), 4.0f * shaded.material->shininess);
 
         if (material_has.diffuse)
             return shaded.diffuse.scaleAdd(clampedValue(NdotL), color);

@@ -5,7 +5,7 @@
 #include "../scene/selection.h"
 #include "../viewport/viewport.h"
 
-void draw(Selection &selection, const Viewport &viewport, const Scene &scene) {
+void drawSelection(Selection &selection, const Viewport &viewport, const Scene &scene) {
     static Box box;
 
     if (controls::is_pressed::alt && !mouse::is_captured && selection.geo_type && selection.geometry) {
@@ -13,17 +13,17 @@ void draw(Selection &selection, const Viewport &viewport, const Scene &scene) {
         if (selection.geometry->type == GeometryType_Mesh)
             selection.xform.scale *= scene.meshes[selection.geometry->id].aabb.max;
 
-        draw(box, selection.xform, viewport, Color(Yellow), 0.5f, 0);
+        drawBox(box, selection.xform, viewport, Yellow, 0.5f, 0);
         if (selection.box_side) {
-            vec3 color = Color(White);
+            ColorID color = White;
             switch (selection.box_side) {
-                case Left:  case Right:  color = Color(Red);   break;
-                case Top:   case Bottom: color = Color(Green); break;
-                case Front: case Back:   color = Color(Blue);  break;
-                case NoSide: break;
+                case BoxSide_Left:  case BoxSide_Right: color = Red;   break;
+                case BoxSide_Top:   case BoxSide_Bottom: color = Green; break;
+                case BoxSide_Front: case BoxSide_Back: color = Blue;  break;
+                case BoxSide_None: break;
             }
 
-            draw(box, selection.xform, viewport, color, 0.5f, 1, selection.box_side);
+            drawBox(box, selection.xform, viewport, color, 0.5f, 1, selection.box_side);
         }
     }
 }

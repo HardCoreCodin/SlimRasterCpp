@@ -8,23 +8,23 @@
 // Or using the single-header file:
 // #include "../SlimRaster.h"
 
-struct ClippingExample : SlimRaster {
+struct ClippingExample : SlimApp {
     // Viewport:
     Camera camera{
             {0, 10, -15},
             {-25*DEG_TO_RAD,0, 0}
     }, *cameras{&camera};
-    Viewport viewport{window::canvas, &camera};
+    Canvas canvas;
+    Viewport viewport{canvas, &camera};
+
+    bool draw_wireframe = false;
 
     HUDLine Fps{      (char*)"Fps      : "};
     HUDLine Wireframe{(char*)"Wireframe: ",
                       (char*)"Off",
                       (char*)"On",
-                      &viewport.show_wireframe, Grey};
-    HUDLine Antialias{(char*)"Antialias: ",
-                      (char*)"Off",
-                      (char*)"On",
-                      &window::canvas.antialias, Grey},
+                      &draw_wireframe, true, Grey};
+    HUDLine Antialias{(char*)"Antialias: ", Grey},
                       *hud_lines{&Fps};
     HUDSettings hud_settings{3,1.2f};
     HUD hud{hud_settings, hud_lines};
@@ -55,24 +55,26 @@ struct ClippingExample : SlimRaster {
     Rasterizer raterizer{scene};
 
     void OnRender() override {
+        canvas.clear();
         Fps.value = (i32)render_timer.average_frames_per_second;
-        raterizer.rasterize(viewport);
+        raterizer.rasterize(viewport, draw_wireframe);
 
-        if (controls::is_pressed::alt) draw(selection, viewport, scene);
-        if (hud.enabled) draw(hud, viewport);
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+        canvas.drawToWindow();
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
             if (controls::is_pressed::ctrl) {
-                if (key == 'W') viewport.show_wireframe = !viewport.show_wireframe;
-                if (key == 'A') viewport.canvas.antialias = !viewport.canvas.antialias;
+                if (key == 'W') draw_wireframe = !draw_wireframe;
+                if (key == 'A') viewport.canvas.antialias = viewport.canvas.antialias == NoAA ? SSAA : NoAA;
             }
         }
 
-        NavigationMove &move = viewport.navigation.move;
-        NavigationTurn &turn = viewport.navigation.turn;
+        Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
         if (key == 'Q') turn.left     = is_pressed;
         if (key == 'E') turn.right    = is_pressed;
         if (key == 'R') move.up       = is_pressed;
@@ -92,6 +94,7 @@ struct ClippingExample : SlimRaster {
         viewport.frustum.near_clipping_plane_distance = 1;
         viewport.updateDimensions(width, height);
         viewport.updateProjection();
+        canvas.dimensions.update(width, height);
     }
 
     void OnMouseButtonDown(mouse::Button &mouse_button) override {
@@ -108,6 +111,6 @@ struct ClippingExample : SlimRaster {
     }
 };
 
-SlimRaster* createEngine() {
-    return (SlimRaster*)new ClippingExample();
+SlimApp* createApp() {
+    return new ClippingExample();
 }

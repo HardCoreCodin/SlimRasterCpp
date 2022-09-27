@@ -1,37 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-
-#ifndef NDEBUG
-#include <tchar.h>
-#include <stdio.h>
-#include <strsafe.h>
-#include <new.h>
-
-void DisplayError(LPTSTR lpszFunction) {
-    LPVOID lpMsgBuf;
-    LPVOID lpDisplayBuf;
-    unsigned int last_error = GetLastError();
-
-    FormatMessage(
-            FORMAT_MESSAGE_ALLOCATE_BUFFER |
-            FORMAT_MESSAGE_FROM_SYSTEM |
-            FORMAT_MESSAGE_IGNORE_INSERTS,
-            nullptr, last_error,
-            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-            (LPTSTR) &lpMsgBuf, 0, nullptr);
-
-    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT, (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR));
-
-    if (FAILED( StringCchPrintf((LPTSTR)lpDisplayBuf, LocalSize(lpDisplayBuf) / sizeof(TCHAR),
-                                TEXT("%s failed with error code %d as follows:\n%s"), lpszFunction, last_error, lpMsgBuf)))
-        printf("FATAL ERROR: Unable to output error code.\n");
-
-    _tprintf(TEXT((LPTSTR)"ERROR: %s\n"), (LPCTSTR)lpDisplayBuf);
-
-    LocalFree(lpMsgBuf);
-    LocalFree(lpDisplayBuf);
-}
-#endif
+#include "./win32_base.h"
 
 #define GET_X_LPARAM(lp)                        ((int)(short)LOWORD(lp))
 #define GET_Y_LPARAM(lp)                        ((int)(short)HIWORD(lp))
@@ -52,14 +19,14 @@ inline UINT getRawInput(LPVOID data) {
     return GetRawInputData(raw_input_handle, RID_INPUT, data, raw_input_size_ptr, raw_input_header_size);
 }
 inline bool hasRawInput() {
-    return getRawInput(0) == 0 && raw_input_size != 0;
+    return (getRawInput(0) == 0) && (raw_input_size != 0);
 }
 inline bool hasRawMouseInput(LPARAM lParam) {
     raw_input_handle = (HRAWINPUT)(lParam);
     return (
-            hasRawInput() &&
-            getRawInput((LPVOID)&raw_inputs) == raw_input_size &&
-            raw_inputs.header.dwType == RIM_TYPEMOUSE
+            (hasRawInput()) &&
+            (getRawInput((LPVOID)&raw_inputs) == raw_input_size) &&
+            (raw_inputs.header.dwType == RIM_TYPEMOUSE)
     );
 }
 
@@ -79,82 +46,22 @@ void os::setWindowCapture(bool on) {
     else ReleaseCapture();
 }
 
-u64 time::getTicks() {
+u64 timers::getTicks() {
     QueryPerformanceCounter(&performance_counter);
     return (u64)performance_counter.QuadPart;
 }
 
-void* os::getMemory(u64 size) {
-    return VirtualAlloc((LPVOID)MEMORY_BASE, (SIZE_T)size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+void* os::getMemory(u64 size, u64 base) {
+    return VirtualAlloc((LPVOID)base, (SIZE_T)size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 }
 
-void os::closeFile(void *handle) {
-    CloseHandle(handle);
-}
+void os::closeFile(void *handle) { return win32_closeFile(handle); }
+void* os::openFileForReading(const char* path) { return win32_openFileForReading(path); }
+void* os::openFileForWriting(const char* path) { return win32_openFileForWriting(path); }
+bool os::readFromFile(LPVOID out, DWORD size, HANDLE handle) { return win32_readFromFile(out, size, handle); }
+bool os::writeToFile(LPVOID out, DWORD size, HANDLE handle) { return win32_writeToFile(out, size, handle); }
 
-void* os::openFileForReading(const char* path) {
-    HANDLE handle = CreateFile(path,           // file to open
-                               GENERIC_READ,          // open for reading
-                               FILE_SHARE_READ,       // share for reading
-                               nullptr,                  // default security
-                               OPEN_EXISTING,         // existing file only
-                               FILE_ATTRIBUTE_NORMAL, // normal file
-                               nullptr);                 // no attr. template
-#ifndef NDEBUG
-    if (handle == INVALID_HANDLE_VALUE) {
-        DisplayError(TEXT((LPTSTR)"CreateFile"));
-        _tprintf(TEXT("Terminal failure: unable to open file \"%s\" for read.\n"), path);
-        return nullptr;
-    }
-#endif
-    return handle;
-}
-
-void* os::openFileForWriting(const char* path) {
-    HANDLE handle = CreateFile(path,           // file to open
-                               GENERIC_WRITE,          // open for writing
-                               0,                      // do not share
-                               nullptr,                   // default security
-                               OPEN_ALWAYS,            // create new or open existing
-                               FILE_ATTRIBUTE_NORMAL,  // normal file
-                               nullptr);
-#ifndef NDEBUG
-    if (handle == INVALID_HANDLE_VALUE) {
-        DisplayError(TEXT((LPTSTR)"CreateFile"));
-        _tprintf(TEXT("Terminal failure: unable to open file \"%s\" for write.\n"), path);
-        return nullptr;
-    }
-#endif
-    return handle;
-}
-
-bool os::readFromFile(LPVOID out, DWORD size, HANDLE handle) {
-    DWORD bytes_read = 0;
-    BOOL result = ReadFile(handle, out, size, &bytes_read, nullptr);
-#ifndef NDEBUG
-    if (result == FALSE) {
-        DisplayError(TEXT((LPTSTR)"ReadFile"));
-        printf("Terminal failure: Unable to read from file.\n GetLastError=%08x\n", (unsigned int)GetLastError());
-        CloseHandle(handle);
-    }
-#endif
-    return result != FALSE;
-}
-
-bool os::writeToFile(LPVOID out, DWORD size, HANDLE handle) {
-    DWORD bytes_written = 0;
-    BOOL result = WriteFile(handle, out, size, &bytes_written, nullptr);
-#ifndef NDEBUG
-    if (result == FALSE) {
-        DisplayError(TEXT((LPTSTR)"WriteFile"));
-        printf("Terminal failure: Unable to write from file.\n GetLastError=%08x\n", (unsigned int)GetLastError());
-        CloseHandle(handle);
-    }
-#endif
-    return result != FALSE;
-}
-
-SlimRaster *CURRENT_ENGINE;
+SlimApp *CURRENT_APP;
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     bool pressed = message == WM_SYSKEYDOWN || message == WM_KEYDOWN;
@@ -164,7 +71,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
     switch (message) {
         case WM_DESTROY:
-            CURRENT_ENGINE->is_running = false;
+            CURRENT_APP->is_running = false;
             PostQuitMessage(0);
             break;
 
@@ -173,7 +80,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
             info.bmiHeader.biWidth = win_rect.right - win_rect.left;
             info.bmiHeader.biHeight = win_rect.top - win_rect.bottom;
-            CURRENT_ENGINE->resize((u16)info.bmiHeader.biWidth, (u16)-info.bmiHeader.biHeight);
+            CURRENT_APP->resize((u16)info.bmiHeader.biWidth, (u16)-info.bmiHeader.biHeight);
 
             break;
 
@@ -203,7 +110,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 case VK_DOWN   : controls::is_pressed::down   = pressed; break;
                 default: break;
             }
-            CURRENT_ENGINE->OnKeyChanged(key, pressed);
+            CURRENT_APP->OnKeyChanged(key, pressed);
 
             break;
 
@@ -240,31 +147,31 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 case WM_LBUTTONDBLCLK:
                     mouse_button->doubleClick(x, y);
                     mouse::double_clicked = true;
-                    CURRENT_ENGINE->OnMouseButtonDoubleClicked(*mouse_button);
+                    CURRENT_APP->OnMouseButtonDoubleClicked(*mouse_button);
                     break;
                 case WM_MBUTTONUP:
                 case WM_RBUTTONUP:
                 case WM_LBUTTONUP:
                     mouse_button->up(x, y);
-                    CURRENT_ENGINE->OnMouseButtonUp(*mouse_button);
+                    CURRENT_APP->OnMouseButtonUp(*mouse_button);
                     break;
                 default:
                     mouse_button->down(x, y);
-                    CURRENT_ENGINE->OnMouseButtonDown(*mouse_button);
+                    CURRENT_APP->OnMouseButtonDown(*mouse_button);
             }
 
             break;
 
         case WM_MOUSEWHEEL:
             scroll_amount = (f32)(GET_WHEEL_DELTA_WPARAM(wParam)) / (f32)(WHEEL_DELTA);
-            mouse::scroll(scroll_amount); CURRENT_ENGINE->OnMouseWheelScrolled(scroll_amount);
+            mouse::scroll(scroll_amount); CURRENT_APP->OnMouseWheelScrolled(scroll_amount);
             break;
 
         case WM_MOUSEMOVE:
             x = GET_X_LPARAM(lParam);
             y = GET_Y_LPARAM(lParam);
-            mouse::move(x, y);        CURRENT_ENGINE->OnMouseMovementSet(x, y);
-            mouse::setPosition(x, y); CURRENT_ENGINE->OnMousePositionSet(x, y);
+            mouse::move(x, y);        CURRENT_APP->OnMouseMovementSet(x, y);
+            mouse::setPosition(x, y); CURRENT_APP->OnMousePositionSet(x, y);
             break;
 
         case WM_INPUT:
@@ -273,11 +180,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     raw_inputs.data.mouse.lLastY != 0)) {
                 x = raw_inputs.data.mouse.lLastX;
                 y = raw_inputs.data.mouse.lLastY;
-                mouse::moveRaw(x, y); CURRENT_ENGINE->OnMouseRawMovementSet(x, y);
+                mouse::moveRaw(x, y); CURRENT_APP->OnMouseRawMovementSet(x, y);
             }
 
         default:
-            return DefWindowProc(hWnd, message, wParam, lParam);
+            return DefWindowProcA(hWnd, message, wParam, lParam);
     }
 
     return 0;
@@ -287,12 +194,12 @@ int APIENTRY WinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
                      LPSTR     lpCmdLine,
                      int       nCmdShow) {
-    void* window_content_and_canvas_memory = GlobalAlloc(GPTR, WINDOW_CONTENT_SIZE + CANVAS_SIZE);
+    void* window_content_and_canvas_memory = GlobalAlloc(GPTR, WINDOW_CONTENT_SIZE + (CANVAS_SIZE * CANVAS_COUNT));
     if (!window_content_and_canvas_memory)
         return -1;
 
     window::content = (u32*)window_content_and_canvas_memory;
-    window::canvas.pixels = (PixelQuad*)((u8*)window_content_and_canvas_memory + WINDOW_CONTENT_SIZE);
+    memory::canvas_memory = (u8*)window_content_and_canvas_memory + WINDOW_CONTENT_SIZE;
 
     controls::key_map::ctrl = VK_CONTROL;
     controls::key_map::alt = VK_MENU;
@@ -308,14 +215,14 @@ int APIENTRY WinMain(HINSTANCE hInstance,
     LARGE_INTEGER performance_frequency;
     QueryPerformanceFrequency(&performance_frequency);
 
-    time::ticks_per_second = (u64)performance_frequency.QuadPart;
-    time::seconds_per_tick = 1.0 / (f64)(time::ticks_per_second);
-    time::milliseconds_per_tick = 1000.0 * time::seconds_per_tick;
-    time::microseconds_per_tick = 1000.0 * time::milliseconds_per_tick;
-    time::nanoseconds_per_tick  = 1000.0 * time::microseconds_per_tick;
+    timers::ticks_per_second = (u64)performance_frequency.QuadPart;
+    timers::seconds_per_tick = 1.0 / (f64)(timers::ticks_per_second);
+    timers::milliseconds_per_tick = 1000.0 * timers::seconds_per_tick;
+    timers::microseconds_per_tick = 1000.0 * timers::milliseconds_per_tick;
+    timers::nanoseconds_per_tick  = 1000.0 * timers::microseconds_per_tick;
 
-    CURRENT_ENGINE = createEngine();
-    if (!CURRENT_ENGINE->is_running)
+    CURRENT_APP = createApp();
+    if (!CURRENT_APP->is_running)
         return -1;
 
     info.bmiHeader.biSize        = sizeof(info.bmiHeader);
@@ -327,7 +234,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
     window_class.hInstance      = hInstance;
     window_class.lpfnWndProc    = WndProc;
     window_class.style          = CS_OWNDC|CS_HREDRAW|CS_VREDRAW|CS_DBLCLKS;
-    window_class.hCursor        = LoadCursorA(nullptr, IDC_ARROW);
+    window_class.hCursor        = LoadCursorA(nullptr, MAKEINTRESOURCEA(32512));
 
     if (!RegisterClassA(&window_class)) return -1;
 
@@ -367,12 +274,13 @@ int APIENTRY WinMain(HINSTANCE hInstance,
     ShowWindow(window_handle, nCmdShow);
 
     MSG message;
-    while (CURRENT_ENGINE->is_running) {
+    while (CURRENT_APP->is_running) {
         while (PeekMessageA(&message, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&message);
             DispatchMessageA(&message);
         }
-        CURRENT_ENGINE->OnWindowRedraw();
+        CURRENT_APP->OnWindowRedraw();
+        mouse::resetChanges();
         InvalidateRgn(window_handle, nullptr, false);
     }
 

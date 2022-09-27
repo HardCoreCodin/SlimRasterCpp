@@ -4,8 +4,8 @@
 #include "./grid.h"
 #include "./box.h"
 #include "./camera.h"
-#include "./texture.h"
 #include "../core/ray.h"
+#include "../core/texture.h"
 #include "../core/transform.h"
 #include "../serialization/mesh.h"
 #include "../serialization/texture.h"
@@ -75,26 +75,25 @@ struct MaterialUses {
 };
 
 struct Shaded {
-    vec3 color, position, normal, viewing_direction, viewing_origin, reflected_direction, light_direction, diffuse;
-    vec2 UV, dUV;
+    Color color;
+    vec3 position, normal, viewing_direction, viewing_origin, reflected_direction, light_direction, diffuse;
     vec2i coords;
-    f32 opacity;
+    f32 opacity, u, v, uv_area;
     f64 depth;
     Material *material;
     Geometry *geometry;
 };
 
 
-struct AmbientLight{ vec3 color; };
+struct AmbientLight{ Color color; };
 struct Light {
-    vec3 position_or_direction, color, attenuation;
-    f32 intensity;
+    vec3 position_or_direction, color;
+    f32 intensity = 1.0f;
     bool is_directional;
 
     Light(const vec3 &position_or_direction, const vec3 &color, f32 intensity = 1.0f, bool is_directional = false) :
             position_or_direction{position_or_direction},
             color{color},
-            attenuation{1.0f},
             intensity{intensity},
             is_directional{is_directional}
     {}
