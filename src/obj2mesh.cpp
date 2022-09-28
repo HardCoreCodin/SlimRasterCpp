@@ -11,17 +11,9 @@
 #include <string.h>
 #include <unordered_set>
 
-#include "./SlimRaster/platforms/win32_base.h"
-#include "./SlimRaster/scene/bvh_builder.h"
-#include "./SlimRaster/serialization/mesh.h"
-
-void* os::getMemory(u64 size, u64 base) { return VirtualAlloc((LPVOID)base, (SIZE_T)size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE); }
-void os::closeFile(void *handle) { return win32_closeFile(handle); }
-void* os::openFileForReading(const char* path) { return win32_openFileForReading(path); }
-void* os::openFileForWriting(const char* path) { return win32_openFileForWriting(path); }
-bool os::readFromFile(LPVOID out, DWORD size, HANDLE handle) { return win32_readFromFile(out, size, handle); }
-bool os::writeToFile(LPVOID out, DWORD size, HANDLE handle) { return win32_writeToFile(out, size, handle); }
-
+#include "./slim/platforms/win32_base.h"
+#include "./slim/scene/bvh_builder.h"
+#include "./slim/serialization/mesh.h"
 
 // Or using the single-header file:
 // #include "../slim.h"

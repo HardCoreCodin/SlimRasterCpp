@@ -1,12 +1,12 @@
-#include "../SlimRaster/scene/selection.h"
-#include "../SlimRaster/draw/hud.h"
-#include "../SlimRaster/draw/selection.h"
-#include "../SlimRaster/renderer/rasterizer.h"
-#include "../SlimRaster/renderer/pixel_shaders.h"
-#include "../SlimRaster/renderer/mesh_shaders.h"
-#include "../SlimRaster/app.h"
+#include "../slim/scene/selection.h"
+#include "../slim/draw/hud.h"
+#include "../slim/draw/selection.h"
+#include "../slim/renderer/rasterizer.h"
+#include "../slim/renderer/pixel_shaders.h"
+#include "../slim/renderer/mesh_shaders.h"
+#include "../slim/app.h"
 // Or using the single-header file:
-// #include "../SlimRaster.h"
+// #include "../slim.h"
 
 struct ClippingExample : SlimApp {
     // Viewport:
