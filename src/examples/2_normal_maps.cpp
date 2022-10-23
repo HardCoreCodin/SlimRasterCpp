@@ -69,7 +69,7 @@ struct NormalMapsExample : SlimApp {
         viewport.frustum.near_clipping_plane_distance = 1;
         viewport.updateProjection();
 
-        scene.ambient_light.color = {0.008f, 0.008f, 0.014f};
+        scene.ambient_light.color = Color{0.008f, 0.008f, 0.014f};
 
         floor_material.texture_ids[0] = 0;
         floor_material.texture_ids[1] = 1;

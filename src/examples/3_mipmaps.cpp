@@ -21,10 +21,10 @@ static ColorID MIP_LEVEL_COLORS[9] = {
 };
 void shadeDebugHybridTextured(Shaded &shaded, const Scene &scene) {
     Texture &texture = scene.textures[shaded.material->texture_count > 1 ? shaded.material->texture_ids[0] : 0];
-    i32 mip_level = Texture::GetMipLevel(texture, shaded.uv_area);
+    i32 mip_level = (i32)Texture::GetMipLevel(texture, shaded.uv_area);
     mip_level += (i32)shaded.material->shininess;
-    if (mip_level >= texture.mip_count)
-        mip_level = texture.mip_count - 1;
+    if (mip_level >= (i32)texture.mip_count)
+        mip_level = (i32)texture.mip_count - 1;
     if (mip_level < 0)
         mip_level = 0;
     shaded.color = shaded.coords.x > (i32)shaded.material->roughness ? MIP_LEVEL_COLORS[mip_level] : texture.mips[mip_level].sample(shaded.u, shaded.v).color;
@@ -96,7 +96,7 @@ struct NormalMapsExample : SlimApp {
         viewport.frustum.near_clipping_plane_distance = 1;
         viewport.updateProjection();
 
-        scene.ambient_light.color = {0.008f, 0.008f, 0.014f};
+        scene.ambient_light.color = Color{0.008f, 0.008f, 0.014f};
 
         floor_material.texture_ids[0] = 0;
         floor_material.texture_ids[1] = 1;
