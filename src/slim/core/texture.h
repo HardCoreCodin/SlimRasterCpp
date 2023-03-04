@@ -61,6 +61,10 @@ struct Texture : ImageInfo {
         return GetMipLevel(uv_area * (f32)(texture.width * texture.height), texture.mip_count);
     }
 
+    INLINE_XPU u32 mipLevel(f32 uv_area) const {
+        return GetMipLevel(uv_area * (f32)(width * height), mip_count);
+    }
+
     INLINE_XPU Pixel sample(f32 u, f32 v, f32 uv_area) const {
         return mips[flags.mipmap ? GetMipLevel(uv_area * (f32)(width * height), mip_count) : 0].sample(u, v);
     }

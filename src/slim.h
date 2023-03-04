@@ -118,7 +118,8 @@ typedef double f64;
 #define FONT_WIDTH 9
 #define FONT_HEIGHT 12
 
-#define TAU 6.28f
+#define PI 3.14159265358979323846
+#define TAU (2.0 * PI)
 #define COLOR_COMPONENT_TO_FLOAT 0.00392156862f
 #define FLOAT_TO_COLOR_COMPONENT 255.0f
 #define DEG_TO_RAD 0.0174533f
@@ -1605,6 +1606,10 @@ struct Texture : ImageInfo {
         return GetMipLevel(uv_area * (f32)(texture.width * texture.height), texture.mip_count);
     }
 
+    INLINE_XPU u32 mipLevel(f32 uv_area) const {
+        return GetMipLevel(uv_area * (f32)(width * height), mip_count);
+    }
+
     INLINE_XPU Pixel sample(f32 u, f32 v, f32 uv_area) const {
         return mips[flags.mipmap ? GetMipLevel(uv_area * (f32)(width * height), mip_count) : 0].sample(u, v);
     }
@@ -2526,6 +2531,166 @@ INLINE_XPU vec2 lerp(const vec2 &from, const vec2 &to, f32 by) {
     return (to - from).scaleAdd(by, from);
 }
 
+struct comp {
+    f32 real, imag;
+
+    INLINE_XPU comp(f32 real = 0.0f, f32 imag = 0.0f) : real{real}, imag{imag} {}
+
+    INLINE_XPU f32 length() const {
+        return sqrtf(real*real + imag*imag);
+    }
+
+    INLINE_XPU comp conjugate() const {
+        return {real, -imag};
+    }
+
+    INLINE_XPU comp operator + (f32 rhs) const {
+        return {real + rhs, imag};
+    }
+
+    INLINE_XPU comp& operator += (f32 rhs) {
+        real += rhs;
+        return *this;
+    }
+
+    INLINE_XPU comp operator - (f32 rhs) const {
+        return {real - rhs, imag};
+    }
+
+    INLINE_XPU comp& operator -= (f32 rhs) {
+        real -= rhs;
+        return *this;
+    }
+
+    INLINE_XPU comp operator * (f32 rhs) const {
+        comp result{*this};
+        result *= rhs;
+        return result;
+    }
+
+    INLINE_XPU comp& operator *= (f32 rhs) {
+        real *= rhs;
+        imag *= rhs;
+        return *this;
+    }
+
+    INLINE_XPU comp operator + (const comp &rhs) const {
+        comp result{*this};
+        result += rhs;
+        return result;
+    }
+
+    INLINE_XPU comp& operator += (const comp &rhs) {
+        real += rhs.real;
+        imag += rhs.imag;
+        return *this;
+    }
+
+    INLINE_XPU comp operator - (const comp &rhs) const {
+        comp result{*this};
+        result -= rhs;
+        return result;
+    }
+
+    INLINE_XPU comp& operator -= (const comp &rhs) {
+        real -= rhs.real;
+        imag -= rhs.imag;
+        return *this;
+    }
+
+    INLINE_XPU comp operator * (const comp &rhs) const {
+        comp result{*this};
+        result *= rhs;
+        return result;
+    }
+
+    INLINE_XPU comp& operator *= (const comp &rhs) {
+        f32 x = real;
+        f32 y = imag;
+        real = fast_mul_add(x, rhs.real, y * -rhs.imag);
+        imag = fast_mul_add(x, rhs.imag, y * rhs.real);
+        return *this;
+    }
+};
+
+
+INLINE_XPU void generateOrbit(u32 N, comp *array, bool full = true, bool clockwise = false, bool reuse_rotation = false) {
+    if (N == 0) return;
+
+    array[0] = {1, 0};
+    if (N == 1) return;
+
+    f64 angle_step = TAU / (f64)N;
+    f32 direction = clockwise ? -1.0f : 1.0f;
+    if (!full) N >>= 1;
+
+    if (reuse_rotation) {
+        comp step{cosf(angle_step), direction * sinf(angle_step)};
+
+        array[1] = step;
+        if (N == 2) return;
+
+        comp current{step};
+        for (u32 i = 2; i < N; i++)
+            array[i] = current *= step;
+    } else {
+        f64 angle = angle_step;
+        for (u32 i = 1; i < N; i++, angle += angle_step)
+            array[i] = {(f32)(cos(angle)), direction * (f32)(sin(angle))};
+    }
+}
+
+INLINE_XPU void initFFTws(comp *w, u8 power_of_2) {
+//    generateOrbit(1 << power_of_2, w, false, true);
+    u32 N = 1 << power_of_2;
+    u32 N_over_2 = N / 2;
+    f64 one_over_N = 1.0 / (f64)N;
+    f64 angle_step = TAU * one_over_N;
+    f64 angle = 0;
+    for (u32 i = 0; i < N_over_2; i++, angle += angle_step) {
+        w[i] = {(f32)(cos(angle)), -(f32)(sin(angle))};
+        w[i + N_over_2] = w[i].conjugate();
+    }
+}
+
+INLINE_XPU u32 bitReversed(u32 number, u8 bit_count) {
+    u32 reverse_number = 0;
+    for (u32 i = 0, bit = 1; i < bit_count; i++, bit <<= 1)
+        if ((number & bit))
+            reverse_number |= 1 << ((bit_count - 1) - i);
+
+    return reverse_number;
+}
+
+INLINE_XPU void FFT(comp *signal, comp *w, u8 power_of_2, comp *waves) {
+    u32 N = 1 << power_of_2;
+    u32 N_over_2 = N >> 1;
+    for (u32 i = 0; i < N; i++) waves[i] = signal[bitReversed(i, power_of_2)];
+    for (u32 step = 1, jump = 2, w_step = N_over_2; step < N; step <<= 1, jump <<= 1, w_step >>= 1) {
+        for (u32 butterfly = 0, w_index = 0; butterfly < step; butterfly++, w_index += w_step) {
+            for (u32 top_index = butterfly; top_index < N; top_index += jump) {
+                comp &top{waves[top_index]};
+                comp &bottom{waves[top_index + step]};
+                comp bottom_rotated{bottom * w[w_index]};
+                bottom = top - bottom_rotated;
+                top += bottom_rotated;
+            }
+        }
+    }
+}
+
+INLINE_XPU void IFFT(comp *signal, comp *w, u8 power_of_2, comp *waves) {
+    FFT(waves, w + (1 << (power_of_2 - 1)), power_of_2, signal);
+}
+
+bool compareFFT(comp *output, comp *expected) {
+    for (u8 i = 0; i < 8; i++)
+        if (abs(output[i].real - expected[i].real) > 0.01f ||
+            abs(output[i].imag - expected[i].imag) > 0.01f)
+            return false;
+
+    return true;
+}
 
 #define SLIM_VEC3
 
@@ -4962,9 +5127,22 @@ struct Camera : OrientationUsing3x3Matrix {
         position += up * up_amount + right * right_amount;
     }
 
-    INLINE_XPU vec3 getRayDirectionAt(f32 x, f32 y, f32 width, f32 height) const {
-        vec3 start{forward.scaleAdd(focal_length * height,up.scaleAdd(height,right * -width))};
-        return right.scaleAdd(x * 2.0f + 1,up.scaleAdd(1 - 2.0f * y, start)).normalized();
+    INLINE_XPU vec3 getTopLeftCornerOfProjectionPlane(f32 aspect_ratio) const {
+        return forward.scaleAdd(focal_length, right.scaleAdd(-aspect_ratio, up));
+    }
+
+    INLINE_XPU vec3 getRayDirectionAt(i32 x, i32 y, f32 aspect_ratio, f32 normalization_factor, bool use_pixel_centers = true) const {
+        f32 X = (f32)x * normalization_factor;
+        f32 Y = (f32)y * normalization_factor;
+        vec3 start = getTopLeftCornerOfProjectionPlane(aspect_ratio);
+
+        if (use_pixel_centers) {
+            normalization_factor *= 0.5f;
+            start += right * normalization_factor;
+            start -= up * normalization_factor;
+        }
+
+        return right.scaleAdd(X, up.scaleAdd(-Y, start)).normalized();
     }
 
     INLINE_XPU vec3 internPos(const vec3 &pos) const { return _unrotate(_untranslate(pos)); }
@@ -5252,6 +5430,92 @@ struct CubeMesh : Mesh {
 
             {-1 , +1}
     } {}
+};
+
+struct GridMesh : Mesh {
+    static u32 getGridMemorySize(u32 u_segments, u32 v_segments) {
+        u32 U = u_segments + 1;
+        u32 V = v_segments + 1;
+        u32 uv_segments = u_segments * v_segments;
+
+        u32 vertices = U * V;
+        u32 edges = uv_segments * 3;
+        u32 triangles = uv_segments * 2;
+
+        return (
+                (sizeof(vec2) + sizeof(vec3) * 2) * vertices +
+                sizeof(EdgeVertexIndices) * edges +
+                sizeof(TriangleVertexIndices) * triangles * 3
+        );
+    }
+
+    GridMesh(u32 u_segments, u32 v_segments, memory::MonotonicAllocator *memory_allocator = nullptr) {
+        u32 U = u_segments + 1;
+        u32 V = v_segments + 1;
+        u32 uv_segments = u_segments * v_segments;
+
+        uvs_count = normals_count = vertex_count = U * V;
+        edge_count = uv_segments * 3;
+        triangle_count = uv_segments * 2;
+
+        memory::MonotonicAllocator temp_allocator;
+        if (!memory_allocator) {
+            temp_allocator = memory::MonotonicAllocator{getGridMemorySize(u_segments, v_segments), Terabytes(4)};
+            memory_allocator = &temp_allocator;
+        }
+
+        vertex_positions = (vec3*)memory_allocator->allocate(sizeof(vec3) * vertex_count);
+        vertex_normals   = (vec3*)memory_allocator->allocate(sizeof(vec3) * normals_count);
+        vertex_uvs       = (vec2*)memory_allocator->allocate(sizeof(vec2) * uvs_count);
+
+        vertex_position_indices = (TriangleVertexIndices*)memory_allocator->allocate(sizeof(TriangleVertexIndices) * triangle_count);
+        vertex_normal_indices   = (TriangleVertexIndices*)memory_allocator->allocate(sizeof(TriangleVertexIndices) * triangle_count);
+        vertex_uvs_indices      = (TriangleVertexIndices*)memory_allocator->allocate(sizeof(TriangleVertexIndices) * triangle_count);
+
+        edge_vertex_indices = (EdgeVertexIndices*)memory_allocator->allocate(sizeof(EdgeVertexIndices) * edge_count);
+
+        f32 u_step = 1.0f / (f32)u_segments;
+        f32 v_step = 1.0f / (f32)v_segments;
+
+        u32 triangle_index = 0;
+        u32 edge_index = 0;
+        u32 vertex_index = 0;
+        vec2 uv_start;
+        vec2 *uv = vertex_uvs;
+        vec3 *pos = vertex_positions;
+        vec3 *n = vertex_normals;
+
+        for (u32 v = 0; v < V; v++) {
+            uv_start.x = 0.0f;
+            for (u32 u = 0; u < U; u++, uv++, n++, pos++, vertex_index++) {
+                *uv = uv_start;
+                *pos = vec3{uv_start.x, 0.0f, uv_start.y};
+                *n = {0, 1, 0};
+
+                if (u != u_segments &&
+                    v != v_segments) {
+                    edge_vertex_indices[edge_index++] = {vertex_index, vertex_index + 1};
+                    edge_vertex_indices[edge_index++] = {vertex_index, vertex_index + U};
+                    edge_vertex_indices[edge_index++] = {vertex_index, vertex_index + U + 1};
+
+                    vertex_position_indices[triangle_index].v1 = vertex_index;
+                    vertex_position_indices[triangle_index].v2 = vertex_index + U + 1;
+                    vertex_position_indices[triangle_index].v3 = vertex_index + U;
+                    vertex_normal_indices[triangle_index] = vertex_uvs_indices[triangle_index] = vertex_position_indices[triangle_index];
+                    triangle_index++;
+
+                    vertex_position_indices[triangle_index].v1 = vertex_index;
+                    vertex_position_indices[triangle_index].v2 = vertex_index + 1;
+                    vertex_position_indices[triangle_index].v3 = vertex_index + U + 1;
+                    vertex_normal_indices[triangle_index] = vertex_uvs_indices[triangle_index] = vertex_position_indices[triangle_index];
+                    triangle_index++;
+                }
+
+                uv_start.x += u_step;
+            }
+            uv_start.y += v_step;
+        }
+    }
 };
 
 
@@ -5899,7 +6163,7 @@ struct Scene {
         u32 capacity = 0;
 
         if (counts.textures) capacity += getTotalMemoryForTextures(texture_files, counts.textures);
-        if (counts.meshes) {
+        if (meshes && mesh_files && counts.meshes) {
             for (u32 i = 0; i < counts.meshes; i++)
                 meshes[i] = Mesh{};
 
@@ -5912,22 +6176,26 @@ struct Scene {
             memory_allocator = &temp_allocator;
         }
 
-        if (meshes && mesh_files && counts.meshes) {
-            for (u32 i = 0; i < counts.meshes; i++)
-                meshes[i] = Mesh{};
+        if (meshes && counts.meshes) {
+            if (mesh_files) {
+                for (u32 i = 0; i < counts.meshes; i++)
+                    meshes[i] = Mesh{};
 
-            mesh_bvh_node_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-            mesh_triangle_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-            mesh_vertex_counts   = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+                mesh_bvh_node_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+                mesh_triangle_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+                mesh_vertex_counts   = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+            }
 
             max_triangle_count = 0;
             max_vertex_positions = 0;
             max_vertex_normals = 0;
             for (u32 i = 0; i < counts.meshes; i++) {
-                load(meshes[i], mesh_files[i].char_ptr, memory_allocator);
-                mesh_bvh_node_counts[i] = meshes[i].bvh.node_count;
-                mesh_triangle_counts[i] = meshes[i].triangle_count;
-                mesh_vertex_counts[i] = meshes[i].vertex_count;
+                if (mesh_files) {
+                    load(meshes[i], mesh_files[i].char_ptr, memory_allocator);
+                    mesh_bvh_node_counts[i] = meshes[i].bvh.node_count;
+                    mesh_triangle_counts[i] = meshes[i].triangle_count;
+                    mesh_vertex_counts[i] = meshes[i].vertex_count;
+                }
                 if (meshes[i].triangle_count > max_triangle_count) max_triangle_count = meshes[i].triangle_count;
                 if (meshes[i].vertex_count  > max_vertex_positions) max_vertex_positions = meshes[i].vertex_count;
                 if (meshes[i].normals_count > max_vertex_normals) max_vertex_normals     = meshes[i].normals_count;
@@ -8113,11 +8381,12 @@ struct Selection {
 
         const Dimensions &dimensions = viewport.dimensions;
         Camera &camera = *viewport.camera;
-        f32 x = (f32)(mouse::pos_x - viewport.bounds.left);
-        f32 y = (f32)(mouse::pos_y - viewport.bounds.top);
+        i32 x = mouse::pos_x - viewport.bounds.left;
+        i32 y = mouse::pos_y - viewport.bounds.top;
+        f32 normalization_factor = 2.0f / dimensions.f_height;
 
         ray.origin = camera.position;
-        ray.direction = camera.getRayDirectionAt(x, y, dimensions.f_width, dimensions.f_height);
+        ray.direction = camera.getRayDirectionAt(x, y, dimensions.width_over_height, normalization_factor);
         ray.hit.distance_squared = INFINITY;
 
         if (mouse::left_button.is_pressed && !left_mouse_button_was_pressed) {
@@ -8206,15 +8475,15 @@ struct Selection {
                     // BoxSide_Back-project the new mouse position onto a quad at a distance of the selected-object away from the camera
 
                     // Screen -> NDC:
-                    x = (x + 0.5f) / dimensions.h_width  - 1;
-                    y = (y + 0.5f) / dimensions.h_height - 1;
+                    f32 X = ((f32)x + 0.5f) / dimensions.h_width  - 1;
+                    f32 Y = ((f32)y + 0.5f) / dimensions.h_height - 1;
 
                     // NDC -> View:
-                    x *= object_distance / (camera.focal_length * dimensions.height_over_width);
-                    y *= object_distance / camera.focal_length;
+                    X *= object_distance / (camera.focal_length * dimensions.height_over_width);
+                    Y *= object_distance / camera.focal_length;
 
                     // View -> World (BoxSide_Back-track by the world offset from the hit position back to the selected-object's center):
-                    *world_position = camera.rotation * vec3{x, -y, object_distance} + camera.position - world_offset;
+                    *world_position = camera.rotation * vec3{X, -Y, object_distance} + camera.position - world_offset;
                 }
             }
         }
@@ -8593,15 +8862,18 @@ void shadePixelClassic(Shaded &shaded, const Scene &scene) {
         NdotRd = clampedValue(shaded.normal.dot(shaded.viewing_direction));
         shaded.reflected_direction = reflectWithDot(shaded.viewing_direction, shaded.normal, NdotRd);
     }
-
+    f32 one_over_distance;
     Light *light = scene.lights;
     for (u32 i = 0; i < scene.counts.lights; i++, light++) {
         shaded.light_direction = light->position_or_direction - shaded.position;
-        squared_distance = shaded.light_direction.squaredLength();
-        shaded.light_direction = shaded.light_direction / sqrtf(squared_distance);
         NdotL = shaded.normal.dot(shaded.light_direction);
-        if (NdotL > 0)
+        if (NdotL > 0) {
+            squared_distance = shaded.light_direction.squaredLength();
+            one_over_distance = 1.0f / sqrtf(squared_distance);
+            shaded.light_direction *= one_over_distance;
+            NdotL *= one_over_distance;
             shaded.color = shadePointOnSurface(shaded, NdotL).mulAdd(light->color * (light->intensity / squared_distance), shaded.color).toColor();
+        }
     }
 
     shaded.color.r = toneMappedBaked(shaded.color.r);

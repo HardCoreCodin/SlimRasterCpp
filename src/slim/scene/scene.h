@@ -80,7 +80,7 @@ struct Scene {
         u32 capacity = 0;
 
         if (counts.textures) capacity += getTotalMemoryForTextures(texture_files, counts.textures);
-        if (counts.meshes) {
+        if (meshes && mesh_files && counts.meshes) {
             for (u32 i = 0; i < counts.meshes; i++)
                 meshes[i] = Mesh{};
 
@@ -93,22 +93,26 @@ struct Scene {
             memory_allocator = &temp_allocator;
         }
 
-        if (meshes && mesh_files && counts.meshes) {
-            for (u32 i = 0; i < counts.meshes; i++)
-                meshes[i] = Mesh{};
+        if (meshes && counts.meshes) {
+            if (mesh_files) {
+                for (u32 i = 0; i < counts.meshes; i++)
+                    meshes[i] = Mesh{};
 
-            mesh_bvh_node_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-            mesh_triangle_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-            mesh_vertex_counts   = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+                mesh_bvh_node_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+                mesh_triangle_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+                mesh_vertex_counts   = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
+            }
 
             max_triangle_count = 0;
             max_vertex_positions = 0;
             max_vertex_normals = 0;
             for (u32 i = 0; i < counts.meshes; i++) {
-                load(meshes[i], mesh_files[i].char_ptr, memory_allocator);
-                mesh_bvh_node_counts[i] = meshes[i].bvh.node_count;
-                mesh_triangle_counts[i] = meshes[i].triangle_count;
-                mesh_vertex_counts[i] = meshes[i].vertex_count;
+                if (mesh_files) {
+                    load(meshes[i], mesh_files[i].char_ptr, memory_allocator);
+                    mesh_bvh_node_counts[i] = meshes[i].bvh.node_count;
+                    mesh_triangle_counts[i] = meshes[i].triangle_count;
+                    mesh_vertex_counts[i] = meshes[i].vertex_count;
+                }
                 if (meshes[i].triangle_count > max_triangle_count) max_triangle_count = meshes[i].triangle_count;
                 if (meshes[i].vertex_count  > max_vertex_positions) max_vertex_positions = meshes[i].vertex_count;
                 if (meshes[i].normals_count > max_vertex_normals) max_vertex_normals     = meshes[i].normals_count;

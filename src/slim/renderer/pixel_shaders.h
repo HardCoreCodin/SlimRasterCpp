@@ -102,15 +102,18 @@ void shadePixelClassic(Shaded &shaded, const Scene &scene) {
         NdotRd = clampedValue(shaded.normal.dot(shaded.viewing_direction));
         shaded.reflected_direction = reflectWithDot(shaded.viewing_direction, shaded.normal, NdotRd);
     }
-
+    f32 one_over_distance;
     Light *light = scene.lights;
     for (u32 i = 0; i < scene.counts.lights; i++, light++) {
         shaded.light_direction = light->position_or_direction - shaded.position;
-        squared_distance = shaded.light_direction.squaredLength();
-        shaded.light_direction = shaded.light_direction / sqrtf(squared_distance);
         NdotL = shaded.normal.dot(shaded.light_direction);
-        if (NdotL > 0)
+        if (NdotL > 0) {
+            squared_distance = shaded.light_direction.squaredLength();
+            one_over_distance = 1.0f / sqrtf(squared_distance);
+            shaded.light_direction *= one_over_distance;
+            NdotL *= one_over_distance;
             shaded.color = shadePointOnSurface(shaded, NdotL).mulAdd(light->color * (light->intensity / squared_distance), shaded.color).toColor();
+        }
     }
 
     shaded.color.r = toneMappedBaked(shaded.color.r);

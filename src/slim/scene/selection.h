@@ -27,11 +27,12 @@ struct Selection {
 
         const Dimensions &dimensions = viewport.dimensions;
         Camera &camera = *viewport.camera;
-        f32 x = (f32)(mouse::pos_x - viewport.bounds.left);
-        f32 y = (f32)(mouse::pos_y - viewport.bounds.top);
+        i32 x = mouse::pos_x - viewport.bounds.left;
+        i32 y = mouse::pos_y - viewport.bounds.top;
+        f32 normalization_factor = 2.0f / dimensions.f_height;
 
         ray.origin = camera.position;
-        ray.direction = camera.getRayDirectionAt(x, y, dimensions.f_width, dimensions.f_height);
+        ray.direction = camera.getRayDirectionAt(x, y, dimensions.width_over_height, normalization_factor);
         ray.hit.distance_squared = INFINITY;
 
         if (mouse::left_button.is_pressed && !left_mouse_button_was_pressed) {
@@ -120,15 +121,15 @@ struct Selection {
                     // BoxSide_Back-project the new mouse position onto a quad at a distance of the selected-object away from the camera
 
                     // Screen -> NDC:
-                    x = (x + 0.5f) / dimensions.h_width  - 1;
-                    y = (y + 0.5f) / dimensions.h_height - 1;
+                    f32 X = ((f32)x + 0.5f) / dimensions.h_width  - 1;
+                    f32 Y = ((f32)y + 0.5f) / dimensions.h_height - 1;
 
                     // NDC -> View:
-                    x *= object_distance / (camera.focal_length * dimensions.height_over_width);
-                    y *= object_distance / camera.focal_length;
+                    X *= object_distance / (camera.focal_length * dimensions.height_over_width);
+                    Y *= object_distance / camera.focal_length;
 
                     // View -> World (BoxSide_Back-track by the world offset from the hit position back to the selected-object's center):
-                    *world_position = camera.rotation * vec3{x, -y, object_distance} + camera.position - world_offset;
+                    *world_position = camera.rotation * vec3{X, -Y, object_distance} + camera.position - world_offset;
                 }
             }
         }
